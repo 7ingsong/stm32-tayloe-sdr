@@ -37,7 +37,6 @@ void on_adc(uint32_t *buf, int n){
     int size = n * sizeof(uint32_t);
     fifo_write(&fifo_adc, (uint8_t*)buf, size);
 
-    led_control(toggle);
     toggle^=1;
 }
 
@@ -51,7 +50,6 @@ void on_dac(uint32_t *buf, int n) {
         resp_iq_stream_tx_info.consumtion_fail++;
     }
 
-    // led_control(half);
     half^=1;
 }
 
