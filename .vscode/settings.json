@@ -1,0 +1,21 @@
+{
+    "files.associations": {
+        "misc.h": "c",
+        "stm32f10x_gpio.h": "c",
+        "usbd.h": "c",
+        "stm32f10x_conf.h": "c",
+        "console.h": "c",
+        "hw_config.h": "c",
+        "usb_lib.h": "c",
+        "timer.h": "c",
+        "stdint.h": "c",
+        "ssd1306_tests.h": "c",
+        "si5351.h": "c",
+        "stm32f10x_rcc.h": "c",
+        "stm32f10x.h": "c",
+        "utils.h": "c",
+        "usb_istr.h": "c",
+        "stm32f10x_exti.h": "c",
+        "stm32_it.h": "c"
+    }
+}
