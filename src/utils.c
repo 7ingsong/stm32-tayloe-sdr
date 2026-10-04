@@ -16,7 +16,7 @@ void systick_init(){
 void clock_init(){
     // 72 Mhz
     RCC_DeInit();
-    RCC_HSEConfig(RCC_HSE_ON);
+    RCC_HSEConfig(RCC_HSE_Bypass); // use RCC_HSE_ON with external crystal
     while (RCC_WaitForHSEStartUp() == ERROR);
 
     RCC_HCLKConfig(RCC_SYSCLK_Div1); /// HCLK = SYSCLK

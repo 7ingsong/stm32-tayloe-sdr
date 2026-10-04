@@ -66,9 +66,9 @@ blocks:
     min_len: '200'
     orient: QtCore.Qt.Horizontal
     rangeType: float
-    start: -10e3
+    start: -samp_rate//2
     step: '10'
-    stop: 10e3
+    stop: samp_rate//2
     value: '0'
     widget: counter_slider
   states:
@@ -117,25 +117,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [240, 84.0]
-    rotation: 0
-    state: disabled
-- name: blocks_multiply_const_vxx_0
-  id: blocks_multiply_const_vxx
-  parameters:
-    affinity: ''
-    alias: ''
-    comment: ''
-    const: '5'
-    maxoutbuf: '0'
-    minoutbuf: '0'
-    type: complex
-    vlen: '1'
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [920, 268.0]
+    coordinate: [192, 92.0]
     rotation: 0
     state: disabled
 - name: blocks_multiply_xx_0
@@ -171,7 +153,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [64, 136.0]
+    coordinate: [80, 160.0]
     rotation: 0
     state: enabled
 - name: hilbert_fc_0
@@ -189,7 +171,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [352, 164.0]
+    coordinate: [328, 172.0]
     rotation: 0
     state: enabled
 - name: low_pass_filter_0
@@ -231,7 +213,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1048, 224.0]
+    coordinate: [1088, 272.0]
     rotation: 0
     state: enabled
 - name: pfb_arb_resampler_xxx_0
@@ -333,21 +315,18 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1016, 92.0]
+    coordinate: [1080, 92.0]
     rotation: 0
     state: enabled
 
 connections:
 - [analog_sig_source_x_0, '0', blocks_multiply_xx_0, '1']
 - [audio_source_0, '0', hilbert_fc_0, '0']
-- [blocks_multiply_const_vxx_0, '0', network_tcp_sink_0, '0']
-- [blocks_multiply_const_vxx_0, '0', qtgui_freq_sink_x_0, '0']
 - [blocks_multiply_xx_0, '0', pfb_arb_resampler_xxx_0, '0']
 - [blocks_wavfile_source_0, '0', hilbert_fc_0, '0']
 - [hilbert_fc_0, '0', blocks_multiply_xx_0, '0']
 - [low_pass_filter_0, '0', network_tcp_sink_0, '0']
 - [low_pass_filter_0, '0', qtgui_freq_sink_x_0, '0']
-- [pfb_arb_resampler_xxx_0, '0', blocks_multiply_const_vxx_0, '0']
 - [pfb_arb_resampler_xxx_0, '0', low_pass_filter_0, '0']
 
 metadata:

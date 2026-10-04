@@ -2,11 +2,15 @@
 #include "stm32_it.h"
 #include "usb_lib.h"
 #include "usb_istr.h"
+#include "stm32f10x_rcc.h"
 
 #include <stm32f10x_exti.h>
 
 void NMI_Handler(void)
 {
+    if (RCC_GetITStatus(RCC_IT_CSS) != RESET){
+        RCC_ClearITPendingBit(RCC_IT_CSS);
+    }
 }
 
 void HardFault_Handler(void)

@@ -162,9 +162,9 @@ def draw_plot():
     print("Q values:", coss)
 
 def main():
-    # dds = GnuRadioSink(host="127.0.0.1", port=2000)
+    dds = GnuRadioSink(host="127.0.0.1", port=2000)
     # dds = SinTx(f_out=3000, f_clk=64000)
-    dds = SinTxNoLUT(f_out=1000, f_clk=64000)
+    # dds = SinTxNoLUT(f_out=1000, f_clk=64000)
     
     # dds = GenMeander(f_out=1000, f_clk=64000)
 
@@ -177,7 +177,7 @@ def main():
     client.start_tx()
     iq_data = b""
     consumtion_fail2, dac_overflow2, tx_usb_overflow2, rx_usb_overflow2 = 0, 0, 0, 0
-    deadline = time.time() + 10 #60
+    deadline = time.time() + 60000
     while (deadline-time.time())>0:        
         BS, request_size, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow = client.cmd_iq_stream_tx_info(payload=iq_data)
         # print(f"Send IQ response: {request_size}, {consumtion_fail}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}")

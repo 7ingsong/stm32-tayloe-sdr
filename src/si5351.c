@@ -143,7 +143,7 @@ void si5351_SetupPLL(si5351PLL_t pll, si5351PLLConfig_t* conf) {
     si5351_writeBulk(baseaddr, P1, P2, P3, 0, 0);
 
     // Reset both PLLs
-    si5351_write(SI5351_REGISTER_177_PLL_RESET, (1<<7) | (1<<5) );
+    si5351_write(SI5351_REGISTER_177_PLL_RESET, (pll == SI5351_PLL_A) ? (1<<5) : (1<<7));
 }
 
 // Configures PLL source, drive strength, multisynth divider, Rdivider and phaseOffset.
@@ -371,20 +371,7 @@ void si5351_EnableOutputs(uint8_t enabled) {
 void si5351_write(uint8_t reg, uint8_t value) {
     I2C_WriteByte(SI5351_ADDRESS, reg, value);
 }
-/*
-// Writes an 8 bit value of a register over I2C.
-void si5351_write(uint8_t reg, uint8_t value) {
-    while (HAL_I2C_IsDeviceReady(&I2C_HANDLE, (uint16_t)(SI5351_ADDRESS<<1), 3, HAL_MAX_DELAY) != HAL_OK) { }
 
-    HAL_I2C_Mem_Write(&I2C_HANDLE,                  // i2c handle
-                      (uint8_t)(SI5351_ADDRESS<<1), // i2c address, left aligned
-                      (uint8_t)reg,                 // register address
-                      I2C_MEMADD_SIZE_8BIT,         // si5351 uses 8bit register addresses
-                      (uint8_t*)(&value),           // write returned data to this variable
-                      1,                            // how many bytes to expect returned
-                      HAL_MAX_DELAY);               // timeout
-}
-*/
 // Common code for _SetupPLL and _SetupOutput
 void si5351_writeBulk(uint8_t baseaddr, int32_t P1, int32_t P2, int32_t P3, uint8_t divBy4, si5351RDiv_t rdiv) {
     si5351_write(baseaddr,   (P3 >> 8) & 0xFF);
@@ -395,4 +382,55 @@ void si5351_writeBulk(uint8_t baseaddr, int32_t P1, int32_t P2, int32_t P3, uint
     si5351_write(baseaddr+5, ((P3 >> 12) & 0xF0) | ((P2 >> 16) & 0xF));
     si5351_write(baseaddr+6, (P2 >> 8) & 0xFF);
     si5351_write(baseaddr+7, P2 & 0xFF);
+}
+
+void si5351_init() {
+    I2C1_GPIO_Config();
+    I2C1_Config();
+
+    const int32_t correction = 0;
+    si5351_Init(correction);
+}
+
+void si5351_clk2_8mhz() {
+    si5351PLLConfig_t pll_conf;
+    si5351OutputConfig_t out_conf;
+
+    si5351_CalcIQ(8000000, &pll_conf, &out_conf);
+    si5351_SetupOutput(2, SI5351_PLL_B, SI5351_DRIVE_STRENGTH_2MA, &out_conf, 0);
+    si5351_SetupPLL(SI5351_PLL_B, &pll_conf);
+
+    int enable = (1<<2);
+    si5351_EnableOutputs(enable);
+}
+
+void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength) {
+    si5351PLLConfig_t pll_conf;
+    si5351OutputConfig_t out_conf;
+
+    /*
+    * `phaseOffset` is a 7bit value, calculated from Fpll, Fclk and desired phase shift.
+    * To get N° phase shift the value should be round( (N/360)*(4*Fpll/Fclk) )
+    * Two channels should use the same PLL to make it work. There are other restrictions.
+    * Please see AN619 for more details.
+    *
+    * si5351_CalcIQ() chooses PLL and MS parameters so that:
+    *   Fclk in [1.4..100] MHz
+    *   out_conf.div in [9..127]
+    *   out_conf.num = 0
+    *   out_conf.denum = 1
+    *   Fpll = out_conf.div * Fclk.
+    * This automatically gives 90° phase shift between two channels if you pass
+    * 0 and out_conf.div as a phaseOffset for these channels.
+    */
+
+    
+    si5351_CalcIQ(frequency, &pll_conf, &out_conf);
+
+    si5351_SetupOutput(0, SI5351_PLL_A, strength, &out_conf, 0);
+    si5351_SetupOutput(1, SI5351_PLL_A, strength, &out_conf, (uint8_t)out_conf.div);
+    si5351_SetupPLL(SI5351_PLL_A, &pll_conf);
+
+    int enable = (1<<0)|(1<<1)|(1<<2);
+    si5351_EnableOutputs(enable);
 }
