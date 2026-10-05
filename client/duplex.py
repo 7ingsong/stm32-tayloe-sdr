@@ -136,7 +136,7 @@ def tx_loop(duplex: DuplexClient, dds, stop: threading.Event):
             iq_data = b""
 
         if dac_overflow2 != dac_overflow or tx_usb_overflow2 != tx_usb_overflow or rx_usb_overflow2 != rx_usb_overflow or consumtion_fail != consumtion_fail2 or adc_overflow != adc_overflow2:
-            print(f"Send IQ response: {request_size}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}, adc_overflow={adc_overflow}, rx_dropped={duplex.rx_dropped}")
+            print(f"Send IQ response: free={request_size}, dac_underrun={consumtion_fail}, dac_overflow={dac_overflow}, usb_to_host_overflow={tx_usb_overflow}, usb_from_host_overflow={rx_usb_overflow}, adc_overflow={adc_overflow}, rx_dropped={duplex.rx_dropped}")
             dac_overflow2, tx_usb_overflow2, rx_usb_overflow2, consumtion_fail2, adc_overflow2 = dac_overflow, tx_usb_overflow, rx_usb_overflow, consumtion_fail, adc_overflow
 
 

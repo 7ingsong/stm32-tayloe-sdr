@@ -25,7 +25,7 @@ typedef struct __attribute__((packed)) {
 static usb_stream_info_t resp_iq_stream_tx_info = {};
 
 static fifo_t fifo_dac;
-static uint8_t fifo_buffer_dac[1024*10+1];
+static uint8_t fifo_buffer_dac[1024*20+1]; // ~80 ms at 64 kHz: headroom for host latency spikes
 
 static fifo_t fifo_adc;
 [[maybe_unused]]static uint8_t fifo_buffer_adc[1024*10+1];
@@ -44,10 +44,12 @@ void on_adc(uint32_t *buf, int n){
 
 void on_dac(uint32_t *buf, int n) {
     int size = n * sizeof(uint32_t);
-    int filled_space = fifo_get_filled(&fifo_dac);
-    if (filled_space >= size) {
-        fifo_read(&fifo_dac, (uint8_t*)buf, size);
-    }else{
+    int got = fifo_read(&fifo_dac, (uint8_t*)buf, size);
+    if (got < size) {
+        // Underrun: pad with mid-scale silence instead of replaying the stale half-buffer
+        for (int i = got / 4; i < n; i++) {
+            buf[i] = 0x08000800;
+        }
         resp_iq_stream_tx_info.consumtion_fail++;
     }
 

@@ -162,7 +162,7 @@ def draw_plot():
     print("Q values:", coss)
 
 def main():
-    dds = GnuRadioSink(host="127.0.0.1", port=2000)
+    dds = GnuRadioSink(host="127.0.0.1", port=2002)
     # dds = SinTx(f_out=3000, f_clk=64000)
     # dds = SinTxNoLUT(f_out=1000, f_clk=64000)
     

@@ -85,13 +85,17 @@ void command_dispatch(const dispatch_frame_t dispatch_frame) {
     static uint8_t chunk[64];
     uint8_t data;
     int chunk_len;
+    /* Bound work per call: with USB flow control the host refills as fast as we parse,
+     * so an unbounded loop starves the ADC/DAC half-buffer handlers (>8 ms) and loses blocks */
+    int budget = COMMAND_DISPATCH_MAX_BYTES;
 
     if (usb_rx_overflow != transport_get_rx_overflow()) {
         command_send_error(0, ERR_FIFO_OVERFLOW, 0);
         usb_rx_overflow = transport_get_rx_overflow();
     }
 
-    while ((chunk_len = transport_recv(chunk, sizeof(chunk))) > 0) {
+    while (budget > 0 && (chunk_len = transport_recv(chunk, sizeof(chunk))) > 0) {
+        budget -= chunk_len;
         for (int chunk_pos = 0; chunk_pos < chunk_len; chunk_pos++) {
             data = chunk[chunk_pos];
             switch (parser_state) {

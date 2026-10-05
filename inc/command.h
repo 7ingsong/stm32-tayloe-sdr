@@ -7,6 +7,7 @@
 #define PACKAGE_HEADER_SIZE 8
 #define FRAME_HEADER_SIZE 6
 #define FRAME_MAX_PAYLOAD 256
+#define COMMAND_DISPATCH_MAX_BYTES 1024 // max bytes parsed per command_dispatch() call
 
 enum {
     CMD_PING = 0x01,
