@@ -10,7 +10,7 @@ import struct
 import threading
 import time
 
-RX_PORT = 2001  # device -> GNU Radio (TCP source)
+RX_PORT = 2001  # device -> GNU Radio (UDP source)
 TX_PORT = 2002  # GNU Radio (TCP sink) -> device
 
 
@@ -100,15 +100,19 @@ class DuplexClient:
 
 
 def rx_loop(duplex: DuplexClient, stop: threading.Event):
-    sock = socket.socket()
-    sock.connect(("127.0.0.1", RX_PORT))
+    # UDP so the GNU Radio UDP Source survives restarts of this script (TCP Source accepts only once)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         while not stop.is_set():
             try:
                 data = duplex.rx_queue.get(timeout=0.5)
             except queue.Empty:
                 continue
-            sock.sendall(u12_bytes_to_cf32(data))
+            # One RX frame = 64 samples = 512 bytes cf32, matches the UDP Source payload size
+            try:
+                sock.sendto(u12_bytes_to_cf32(data), ("127.0.0.1", RX_PORT))
+            except OSError:
+                pass  # flowgraph not running yet: drop and keep streaming
     finally:
         sock.close()
 

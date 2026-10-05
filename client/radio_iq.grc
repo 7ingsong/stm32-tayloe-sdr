@@ -176,17 +176,20 @@ blocks:
     coordinate: [632, 124.0]
     rotation: 0
     state: enabled
-- name: network_tcp_source_0
-  id: network_tcp_source
+- name: network_udp_source_0
+  id: network_udp_source
   parameters:
-    addr: 127.0.0.1
     affinity: ''
     alias: ''
     comment: ''
+    header: '0'
+    ipv6: 'False'
     maxoutbuf: '0'
     minoutbuf: '0'
+    notify_missed: 'False'
+    payloadsize: '512'
     port: '2001'
-    server: 'True'
+    src_zeros: 'False'
     type: complex
     vlen: '1'
   states:
@@ -305,7 +308,7 @@ connections:
 - [blocks_multiply_xx_0, '0', low_pass_filter_0, '0']
 - [blocks_multiply_xx_0, '0', qtgui_freq_sink_x_0, '0']
 - [low_pass_filter_0, '0', pfb_arb_resampler_xxx_0, '0']
-- [network_tcp_source_0, '0', blocks_multiply_xx_0, '0']
+- [network_udp_source_0, '0', blocks_multiply_xx_0, '0']
 - [pfb_arb_resampler_xxx_0, '0', blocks_complex_to_imag_0, '0']
 
 metadata:
