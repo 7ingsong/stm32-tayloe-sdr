@@ -124,14 +124,14 @@ blocks:
     affinity: ''
     alias: ''
     comment: ''
-    maxoutbuf: '0'
+    maxoutbuf: '2048'
     minoutbuf: '0'
     vlen: '1'
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [976, 260.0]
+    coordinate: [992, 260.0]
     rotation: 0
     state: enabled
 - name: blocks_multiply_xx_0
@@ -140,7 +140,7 @@ blocks:
     affinity: ''
     alias: ''
     comment: ''
-    maxoutbuf: '0'
+    maxoutbuf: '2048'
     minoutbuf: '0'
     num_inputs: '2'
     type: complex
@@ -163,7 +163,7 @@ blocks:
     decim: '1'
     gain: '1'
     interp: '1'
-    maxoutbuf: '0'
+    maxoutbuf: '2048'
     minoutbuf: '0'
     samp_rate: samp_rate
     type: fir_filter_ccf
@@ -184,7 +184,7 @@ blocks:
     comment: ''
     header: '0'
     ipv6: 'False'
-    maxoutbuf: '0'
+    maxoutbuf: '2048'
     minoutbuf: '0'
     notify_missed: 'False'
     payloadsize: '512'
@@ -206,7 +206,7 @@ blocks:
     alias: ''
     atten: '100'
     comment: ''
-    maxoutbuf: '0'
+    maxoutbuf: '2048'
     minoutbuf: '0'
     nfilts: '32'
     rrate: samp_rate2/samp_rate
@@ -236,7 +236,7 @@ blocks:
     alpha8: '1.0'
     alpha9: '1.0'
     autoscale: 'False'
-    average: '0.2'
+    average: '1.0'
     axislabels: 'True'
     bw: samp_rate
     color1: '"blue"'
