@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #define MAX_USB_PACKET_SIZE 63
+#define USB_RX_PACKET_SIZE 64 // ENDP3 OUT max packet size
 
 #define USB_RX_FIFO_SIZE (1024*3 + 1)
 #define USB_TX_FIFO_SIZE (1024*3 + 1)

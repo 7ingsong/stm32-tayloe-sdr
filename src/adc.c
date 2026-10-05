@@ -9,6 +9,7 @@
 #include "stm32f10x_usart.h"
 #include "stm32f10x_adc.h"
 #include "stm32f10x_dma.h"
+#include "stm32f10x_tim.h"
 #include "misc.h"
 #include "command.h"
 #include "transport.h"
@@ -88,6 +89,17 @@ void adc_init(){
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC2, ENABLE);
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
+
+    // TIM3 TRGO paces the ADC at the same rate as the DAC (TIM2)
+    TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
+    TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
+    TIM_TimeBaseStructure.TIM_Period = 1125-1; // 72e6/1125 = 64000 HZ
+    TIM_TimeBaseStructure.TIM_Prescaler = 1-1;
+    TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
+    TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+    TIM_TimeBaseInit(TIM3, &TIM_TimeBaseStructure);
+    TIM_SelectOutputTrigger(TIM3, TIM_TRGOSource_Update);
 
     GPIO_InitTypeDef GPIO_InitStructure;
 
@@ -101,14 +113,16 @@ void adc_init(){
 
     ADC_InitStructure.ADC_Mode = ADC_Mode_RegSimult;
     ADC_InitStructure.ADC_ScanConvMode = ENABLE;
-    ADC_InitStructure.ADC_ContinuousConvMode = ENABLE;
-    ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
+    ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;
+    ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_T3_TRGO;
     ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;
     ADC_InitStructure.ADC_NbrOfChannel = 1;
     ADC_Init(ADC1, &ADC_InitStructure);
 
-    ADC_RegularChannelConfig(ADC1, ADC_Channel_6, 1, ADC_SampleTime_71Cycles5); // 12e6/(71.5+12.5) = 142857HZ
+    ADC_RegularChannelConfig(ADC1, ADC_Channel_6, 1, ADC_SampleTime_71Cycles5); // 7us conversion, triggered at 64000 HZ
 
+    // ADC2 is the slave in simultaneous mode and must use the software trigger
+    ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
     ADC_Init(ADC2, &ADC_InitStructure);
     ADC_RegularChannelConfig(ADC2, ADC_Channel_7, 1, ADC_SampleTime_71Cycles5);
     ADC_ExternalTrigConvCmd(ADC2, ENABLE);
@@ -131,11 +145,13 @@ void adc_start() {
     ADC_StartCalibration(ADC2);
     while(ADC_GetCalibrationStatus(ADC2));
 
-    ADC_SoftwareStartConvCmd(ADC1, ENABLE);
+    ADC_ExternalTrigConvCmd(ADC1, ENABLE);
+    TIM_Cmd(TIM3, ENABLE);
 }
 
 void adc_stop() {
-    ADC_SoftwareStartConvCmd(ADC1, DISABLE);
+    TIM_Cmd(TIM3, DISABLE);
+    ADC_ExternalTrigConvCmd(ADC1, DISABLE);
     ADC_Cmd(ADC2, DISABLE);
     ADC_Cmd(ADC1, DISABLE);
     ADC_DMACmd(ADC1, DISABLE);

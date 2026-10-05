@@ -247,8 +247,8 @@ class DeviceClient:
 
     def cmd_iq_stream_tx_info(self, payload=bytes()):
         resp = self.req_command(CMD_IQ_STREAM_TX_INFO, cmd_resp=RESP_IQ_STREAM_TX_INFO, payload=payload)
-        bs, free_space, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow = struct.unpack("<HHHHHH", resp)
-        return bs, free_space, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow
+        bs, free_space, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow, adc_overflow = struct.unpack("<HHHHHHH", resp)
+        return bs, free_space, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow, adc_overflow
 
     def get_rx_iq_samples(self, timeout=5.0):
         deadline = time.time() + timeout

@@ -179,7 +179,7 @@ def main():
     consumtion_fail2, dac_overflow2, tx_usb_overflow2, rx_usb_overflow2 = 0, 0, 0, 0
     deadline = time.time() + 60000
     while (deadline-time.time())>0:        
-        BS, request_size, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow = client.cmd_iq_stream_tx_info(payload=iq_data)
+        BS, request_size, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow, adc_overflow = client.cmd_iq_stream_tx_info(payload=iq_data)
         # print(f"Send IQ response: {request_size}, {consumtion_fail}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}")
         if request_size>=BS:
             n = request_size//BS

@@ -19,7 +19,8 @@ __IO uint8_t Receive_Buffer[64];
 uint32_t Receive_length;
 
 __attribute__((weak)) void OnUsbTransmitted() {}
-__attribute__((weak)) void OnUsbReceived(volatile uint8_t* buf, int n) {}
+// Must re-arm ENDP3 with CDC_Receive_DATA() once there is room for the next packet
+__attribute__((weak)) void OnUsbReceived(volatile uint8_t* buf, int n) { CDC_Receive_DATA(); }
 
 void EP1_IN_Callback(void) {
     packet_sent = 1;
@@ -31,7 +32,6 @@ void EP3_OUT_Callback(void) {
     Receive_length = GetEPRxCount(ENDP3);
     PMAToUserBufferCopy((unsigned char*)Receive_Buffer, ENDP3_RXADDR, Receive_length);
     OnUsbReceived(Receive_Buffer, Receive_length);
-    CDC_Receive_DATA();
 }
 
 void (*pEpInt_IN[7])(void) = {

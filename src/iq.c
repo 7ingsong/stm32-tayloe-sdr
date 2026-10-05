@@ -19,6 +19,7 @@ typedef struct __attribute__((packed)) {
     uint16_t dac_overflow;
     uint16_t tx_usb_overflow;
     uint16_t rx_usb_overflow;
+    uint16_t adc_overflow;
 } usb_stream_info_t;
 
 static usb_stream_info_t resp_iq_stream_tx_info = {};
@@ -106,6 +107,7 @@ void command_handler(const frame_t* frame) {
             resp_iq_stream_tx_info.dac_overflow = fifo_get_overflow(&fifo_dac);
             resp_iq_stream_tx_info.tx_usb_overflow = transport_get_tx_overflow();
             resp_iq_stream_tx_info.rx_usb_overflow = transport_get_rx_overflow();
+            resp_iq_stream_tx_info.adc_overflow = fifo_get_overflow(&fifo_adc);
             
             command_send(RESP_IQ_STREAM_TX_INFO, frame->command.seq, (const uint8_t*)&resp_iq_stream_tx_info, sizeof(resp_iq_stream_tx_info));
             break;
@@ -122,8 +124,9 @@ void iq_dispatch() {
 
     static uint8_t iq_usb_stream_seq = 0;
     uint8_t buf[FRAME_MAX_PAYLOAD];
-    int filled = fifo_get_filled(&fifo_adc);
-    if (filled>=FRAME_MAX_PAYLOAD){
+    // Drain every ready RX frame while USB has room; one per loop is too slow when TX traffic is parsed too
+    while (fifo_get_filled(&fifo_adc) >= FRAME_MAX_PAYLOAD &&
+           transport_get_tx_free_space() >= PACKAGE_HEADER_SIZE + FRAME_MAX_PAYLOAD) {
         fifo_read(&fifo_adc, buf, FRAME_MAX_PAYLOAD);
         command_send(RESP_IQ_STREAM_RX, iq_usb_stream_seq++, buf, FRAME_MAX_PAYLOAD);
     }

@@ -53,11 +53,17 @@ class DuplexClient:
                     self.rx_queue.put_nowait(frame["payload"])
                 except queue.Full:
                     self.rx_dropped += 1
+            elif frame["cmd"] == RESP_ERR and frame["seq"] == 0:
+                # Unsolicited device error (e.g. ERR_FIFO_OVERFLOW), not a reply to any request
+                payload = frame["payload"]
+                print(f"Device error: {ERR_NAMES.get(payload[0], payload[0]) if payload else '?'}")
             else:
                 self.resp_queue.put(frame)
 
     def send(self, cmd, payload=b""):
         seq = self.client.next_seq()
+        if seq == 0:  # seq 0 is used by unsolicited device errors
+            seq = self.client.next_seq()
         self.client.serial.write(build_frame(cmd, seq, payload))
         return seq
 
@@ -87,7 +93,7 @@ class DuplexClient:
 
     def iq_stream_tx_info(self, payload=b""):
         resp = self.request(CMD_IQ_STREAM_TX_INFO, cmd_resp=RESP_IQ_STREAM_TX_INFO, payload=payload)
-        return struct.unpack("<HHHHHH", resp)
+        return struct.unpack("<HHHHHHH", resp)
 
     def send_iq_stream_tx(self, payload=b""):
         self.send(CMD_IQ_STREAM_TX, payload)
@@ -109,9 +115,9 @@ def rx_loop(duplex: DuplexClient, stop: threading.Event):
 
 def tx_loop(duplex: DuplexClient, dds, stop: threading.Event):
     iq_data = b""
-    consumtion_fail2, dac_overflow2, tx_usb_overflow2, rx_usb_overflow2 = 0, 0, 0, 0
+    consumtion_fail2, dac_overflow2, tx_usb_overflow2, rx_usb_overflow2, adc_overflow2 = 0, 0, 0, 0, 0
     while not stop.is_set():
-        BS, request_size, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow = duplex.iq_stream_tx_info(payload=iq_data)
+        BS, request_size, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow, adc_overflow = duplex.iq_stream_tx_info(payload=iq_data)
         if request_size >= BS:
             n = request_size // BS
             k = request_size % BS
@@ -129,9 +135,9 @@ def tx_loop(duplex: DuplexClient, dds, stop: threading.Event):
         else:
             iq_data = b""
 
-        if dac_overflow2 != dac_overflow or tx_usb_overflow2 != tx_usb_overflow or rx_usb_overflow2 != rx_usb_overflow or consumtion_fail != consumtion_fail2:
-            print(f"Send IQ response: {request_size}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}, rx_dropped={duplex.rx_dropped}")
-            dac_overflow2, tx_usb_overflow2, rx_usb_overflow2, consumtion_fail2 = dac_overflow, tx_usb_overflow, rx_usb_overflow, consumtion_fail
+        if dac_overflow2 != dac_overflow or tx_usb_overflow2 != tx_usb_overflow or rx_usb_overflow2 != rx_usb_overflow or consumtion_fail != consumtion_fail2 or adc_overflow != adc_overflow2:
+            print(f"Send IQ response: {request_size}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}, adc_overflow={adc_overflow}, rx_dropped={duplex.rx_dropped}")
+            dac_overflow2, tx_usb_overflow2, rx_usb_overflow2, consumtion_fail2, adc_overflow2 = dac_overflow, tx_usb_overflow, rx_usb_overflow, consumtion_fail, adc_overflow
 
 
 def main():

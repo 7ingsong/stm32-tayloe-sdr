@@ -14,6 +14,7 @@ fifo_t usb_rx;
 
 int usb_connected;
 int usb_transmitting;
+static int usb_rx_paused;
 
 static int toggle2 = 0;
 
@@ -34,6 +35,12 @@ void OnUsbTransmitted() {
 void OnUsbReceived(uint8_t* buf, int n) {
     __disable_irq();
     fifo_write(&usb_rx, buf, n);
+    /* Flow control: leave ENDP3 NAKing until the parser frees room for a full packet */
+    if (fifo_get_free_space(&usb_rx) >= USB_RX_PACKET_SIZE) {
+        CDC_Receive_DATA();
+    } else {
+        usb_rx_paused = 1;
+    }
     __enable_irq();
 }
 
@@ -64,6 +71,7 @@ void transport_send(uint8_t* data, int len) {
 void transport_init(void) {
     usb_connected = 0;
     usb_transmitting = 0;
+    usb_rx_paused = 0;
 
     Set_System();
     Set_USBClock();
@@ -77,6 +85,10 @@ void transport_init(void) {
 int transport_recv(uint8_t* buf, int max_len) {
     __disable_irq();
     int n = fifo_read(&usb_rx, buf, max_len);
+    if (usb_rx_paused && fifo_get_free_space(&usb_rx) >= USB_RX_PACKET_SIZE) {
+        usb_rx_paused = 0;
+        CDC_Receive_DATA();
+    }
     __enable_irq();
     return n;
 }
