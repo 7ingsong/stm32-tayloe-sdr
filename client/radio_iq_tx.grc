@@ -98,7 +98,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [112, 268.0]
+    coordinate: [296, 364.0]
     rotation: 0
     state: enabled
 - name: audio_source_0
@@ -138,6 +138,28 @@ blocks:
     coordinate: [480, 228.0]
     rotation: 0
     state: enabled
+- name: blocks_throttle2_0
+  id: blocks_throttle2
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: Paces the WAV file at real time so GNU Radio cannot fill seconds of TCP
+      buffers ahead of the DAC
+    ignoretag: 'True'
+    limit: time
+    maximum: '0.01'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samples_per_second: samp_rate_mic
+    type: float
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [208, 228.0]
+    rotation: 0
+    state: enabled
 - name: blocks_wavfile_source_0
   id: blocks_wavfile_source
   parameters:
@@ -153,28 +175,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [80, 160.0]
-    rotation: 0
-    state: enabled
-- name: blocks_throttle2_0
-  id: blocks_throttle2
-  parameters:
-    affinity: ''
-    alias: ''
-    comment: 'Paces the WAV file at real time so GNU Radio cannot fill seconds of TCP buffers ahead of the DAC'
-    ignoretag: 'True'
-    limit: time
-    maximum: '0.01'
-    maxoutbuf: '0'
-    minoutbuf: '0'
-    samples_per_second: samp_rate_mic
-    type: float
-    vlen: '1'
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [224, 232.0]
+    coordinate: [56, 168.0]
     rotation: 0
     state: enabled
 - name: hilbert_fc_0
@@ -216,7 +217,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [800, 100.0]
+    coordinate: [848, 100.0]
     rotation: 0
     state: enabled
 - name: network_tcp_sink_0
