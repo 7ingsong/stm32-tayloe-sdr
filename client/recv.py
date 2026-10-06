@@ -16,6 +16,7 @@ def main():
 
     resp = client.ping()
     print(f"Ping response: {resp.decode()}")
+    print(f"LO = {client.set_frequency(10000000)} Hz")
     client.start_rx()
 
     try:

@@ -17,6 +17,7 @@ CMD_IQ_STREAM_TX_START = 0x33
 CMD_IQ_STREAM_TX_STOP = 0x34
 CMD_IQ_STREAM_RX_START = 0x35
 CMD_IQ_STREAM_RX_STOP = 0x36
+CMD_SET_FREQ = 0x40
 
 RESP_ACK = 0x80
 RESP_ERR = 0x81
@@ -244,6 +245,12 @@ class DeviceClient:
 
     def stop_rx(self):
         return self.req_command(CMD_IQ_STREAM_RX_STOP, cmd_resp=RESP_ACK)
+
+    def set_frequency(self, hz=None):
+        """Set the LO (Si5351 I/Q outputs) in Hz, or just read it when hz is None. Returns the LO in effect."""
+        payload = b"" if hz is None else struct.pack("<I", int(hz))
+        resp = self.req_command(CMD_SET_FREQ, cmd_resp=RESP_ACK, payload=payload)
+        return struct.unpack("<I", resp)[0]
 
     def cmd_iq_stream_tx_info(self, payload=bytes()):
         resp = self.req_command(CMD_IQ_STREAM_TX_INFO, cmd_resp=RESP_IQ_STREAM_TX_INFO, payload=payload)

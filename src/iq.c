@@ -6,6 +6,7 @@
 #include "fifo.h"
 #include "transport.h"
 #include "stm32f10x.h"
+#include "si5351.h"
 
 typedef struct __attribute__((packed)) {
     uint32_t overflow;
@@ -33,6 +34,13 @@ static fifo_t fifo_adc;
 [[maybe_unused]]static uint8_t half = 0;
 
 static int toggle = 0;
+
+static uint32_t lo_frequency = LO_FREQ_DEFAULT;
+
+void iq_set_frequency(uint32_t frequency) {
+    lo_frequency = frequency;
+    si5351_set_frequency((int32_t)frequency, SI5351_DRIVE_STRENGTH_2MA);
+}
 
 void on_adc(uint32_t *buf, int n){
     int size = n * sizeof(uint32_t);
@@ -73,10 +81,30 @@ static void handle_ping(const frame_t* frame) {
     command_send(RESP_ACK, frame->command.seq, payload, sizeof(payload));
 }
 
+// Empty payload: report the current LO; 4-byte LE payload: set the LO in Hz. ACK carries the LO in effect.
+static void handle_set_freq(const frame_t* frame) {
+    if (frame->command.len == 4) {
+        uint32_t frequency = (uint32_t)frame->payload[0] | ((uint32_t)frame->payload[1] << 8) |
+                             ((uint32_t)frame->payload[2] << 16) | ((uint32_t)frame->payload[3] << 24);
+        if (frequency < LO_FREQ_MIN || frequency > LO_FREQ_MAX) {
+            command_send_error(frame->command.seq, ERR_BAD_PAYLOAD, CMD_SET_FREQ);
+            return;
+        }
+        iq_set_frequency(frequency);
+    } else if (frame->command.len != 0) {
+        command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
+        return;
+    }
+    command_send(RESP_ACK, frame->command.seq, (const uint8_t*)&lo_frequency, sizeof(lo_frequency));
+}
+
 void command_handler(const frame_t* frame) {
     switch (frame->command.cmd) {
         case CMD_PING:
             handle_ping(frame);
+            break;
+        case CMD_SET_FREQ:
+            handle_set_freq(frame);
             break;
         case CMD_IQ_STREAM_TX:
             fifo_write(&fifo_dac, frame->payload, frame->command.len);

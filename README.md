@@ -11,7 +11,7 @@ stream to GNU Radio over TCP.
 
 ## Features
 
-- **Local oscillator**: Si5351 over I²C, tuned to 10 MHz by default (`si5351_set_frequency` in [src/main.c](src/main.c)).
+- **Local oscillator**: Si5351 over I²C, tuned to 10 MHz at boot and retunable at runtime with `CMD_SET_FREQ` (in `duplex.py`: type `f 7100000` while it runs).
   CLK2 outputs 8 MHz, which drives the MCU's HSE (bypass mode) → 72 MHz system clock via PLL.
 - **RX**: ADC1 + ADC2 in regular simultaneous mode (PA6 / PA7), DMA in circular mode,
   ≈142.857 kS/s (12 MHz ADC clock / 84 cycles). Samples are packed 2×12 bit into 32-bit words.
@@ -109,5 +109,6 @@ Every packet, in both directions:
 | `CMD_IQ_STREAM_TX_INFO` | `0x32` | `RESP_IQ_STREAM_TX_INFO` (`0xB2`): block size, free space, underrun / overflow counters |
 | `CMD_IQ_STREAM_TX_START` / `_STOP` | `0x33` / `0x34` | `RESP_ACK` |
 | `CMD_IQ_STREAM_RX_START` / `_STOP` | `0x35` / `0x36` | `RESP_ACK`; while running, the device sends `RESP_IQ_STREAM_RX` (`0xB1`) frames of 256 bytes |
+| `CMD_SET_FREQ` | `0x40` | Payload: LO in Hz as `uint32` LE (1.4–100 MHz), or empty to just read it. `RESP_ACK` with the LO in effect as `uint32` LE; out of range → `ERR_BAD_PAYLOAD` |
 
 Errors come back as `RESP_ERR` (`0x81`) with `[error_code, detail]` — see [inc/command.h](inc/command.h) for the codes.

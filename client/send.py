@@ -173,36 +173,43 @@ def main():
 
     resp = client.ping()
     print(f"Ping response: {resp.decode()}")
-    
+    print(f"LO = {client.set_frequency(10000000)} Hz")
+
     client.start_tx()
     iq_data = b""
     consumtion_fail2, dac_overflow2, tx_usb_overflow2, rx_usb_overflow2 = 0, 0, 0, 0
-    deadline = time.time() + 60000
-    while (deadline-time.time())>0:        
-        BS, request_size, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow, adc_overflow = client.cmd_iq_stream_tx_info(payload=iq_data)
-        # print(f"Send IQ response: {request_size}, {consumtion_fail}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}")
-        if request_size>=BS:
-            n = request_size//BS
-            k = request_size%BS
-            for _ in range(n-1):
-                iq_data = dds.get_iq(BS//4)
-                client.send_iq_stream_tx(payload=iq_data)
+    try:
+        deadline = time.time() + 60000
+        while (deadline-time.time())>0:
+            BS, request_size, consumtion_fail, dac_overflow, tx_usb_overflow, rx_usb_overflow, adc_overflow = client.cmd_iq_stream_tx_info(payload=iq_data)
+            # print(f"Send IQ response: {request_size}, {consumtion_fail}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}")
+            if request_size>=BS:
+                n = request_size//BS
+                k = request_size%BS
+                for _ in range(n-1):
+                    iq_data = dds.get_iq(BS//4)
+                    client.send_iq_stream_tx(payload=iq_data)
 
-            last_chunk = dds.get_iq(BS//4)
-            if k>=4:
-                client.send_iq_stream_tx(payload=last_chunk)
-                iq_data = dds.get_iq(k//4)
+                last_chunk = dds.get_iq(BS//4)
+                if k>=4:
+                    client.send_iq_stream_tx(payload=last_chunk)
+                    iq_data = dds.get_iq(k//4)
+                else:
+                    iq_data = last_chunk
+            elif request_size>=4:
+                iq_data = dds.get_iq(request_size//4)
             else:
-                iq_data = last_chunk
-        elif request_size>=4:
-            iq_data = dds.get_iq(request_size//4)
-        else:
-            iq_data = b""
+                iq_data = b""
 
-        if dac_overflow2 != dac_overflow or tx_usb_overflow2 != tx_usb_overflow or rx_usb_overflow2 != rx_usb_overflow or consumtion_fail != consumtion_fail2:
-            print(f"Send IQ response: {request_size}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}")
-            dac_overflow2, tx_usb_overflow2, rx_usb_overflow2, consumtion_fail2 = dac_overflow, tx_usb_overflow, rx_usb_overflow, consumtion_fail
-    client.stop_tx()
+            if dac_overflow2 != dac_overflow or tx_usb_overflow2 != tx_usb_overflow or rx_usb_overflow2 != rx_usb_overflow or consumtion_fail != consumtion_fail2:
+                print(f"Send IQ response: {request_size}, {dac_overflow}, {tx_usb_overflow}, {rx_usb_overflow}")
+                dac_overflow2, tx_usb_overflow2, rx_usb_overflow2, consumtion_fail2 = dac_overflow, tx_usb_overflow, rx_usb_overflow, consumtion_fail
+    except KeyboardInterrupt:
+        pass
+    finally:
+        client.stop_tx()
+        dds.close()
+        client.close()
 
 
 if __name__ == "__main__":

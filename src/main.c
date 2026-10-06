@@ -34,7 +34,7 @@ int main() {
 
     clock_init();
 
-    si5351_set_frequency(10000000, SI5351_DRIVE_STRENGTH_2MA);
+    iq_set_frequency(LO_FREQ_DEFAULT);
 
     iq_init();
 
