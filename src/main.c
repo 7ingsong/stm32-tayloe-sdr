@@ -2,6 +2,7 @@
 #include "iq.h"
 #include "i2s.h"
 #include "si5351.h"
+#include "mic.h"
 
 int main() {
     si5351_init();
@@ -13,12 +14,16 @@ int main() {
 
     iq_init();
 
+    mic_init(); // ADC3 on PA3, paced by the TIM3 started in iq_init()
+    mic_start();
+
     i2s_init();
     i2s_start();
 
     while (1){
         iq_dispatch();
         i2s_dispatch();
+        mic_dispatch();
     }
 
     return 0;

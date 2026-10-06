@@ -8,6 +8,8 @@
 #include "stm32f10x.h"
 #include "si5351.h"
 #include "audio.h"
+#include "mic.h"
+#include "ssb_tx.h"
 
 typedef struct __attribute__((packed)) {
     uint32_t overflow;
@@ -40,6 +42,28 @@ static uint32_t lo_frequency = LO_FREQ_DEFAULT;
 
 // The ADC runs from boot for the I2S audio; RX_START/STOP only gate streaming it over USB
 static int rx_streaming = 0;
+
+// The DAC runs from boot fed by the mic SSB modulator; TX_START hands it to the host, TX_STOP gives it back
+static int tx_from_mic = 1;
+
+#define DAC_PRIME_BLOCKS 2 // mic and DAC clocks are locked, so this fill level never drifts
+
+static void dac_restart_fifo(int prime_blocks) {
+    static const uint32_t silence = 0x08000800;
+    fifo_dac.tail = fifo_dac.head;
+    for (int i = 0; i < prime_blocks * MIC_N_SAMPLES / 2; i++) {
+        fifo_write(&fifo_dac, (const uint8_t*)&silence, sizeof(silence));
+    }
+}
+
+void on_mic(uint16_t *buf, int n) {
+    if (!tx_from_mic) {
+        return;
+    }
+    static uint32_t iq[MIC_N_SAMPLES / 2]; // 2 KB: keep it off the small stack
+    ssb_tx_process(buf, n, iq);
+    fifo_write(&fifo_dac, (const uint8_t*)iq, n * sizeof(uint32_t));
+}
 
 void iq_set_frequency(uint32_t frequency) {
     lo_frequency = frequency;
@@ -82,6 +106,9 @@ void iq_init() {
     dac_init();
     adc_init();
     adc_start();
+
+    dac_restart_fifo(DAC_PRIME_BLOCKS);
+    dac_start();
 }
 
 static void handle_ping(const frame_t* frame) {
@@ -119,13 +146,13 @@ void command_handler(const frame_t* frame) {
             break;
 
         case CMD_IQ_STREAM_TX_START:
-            dac_start();
-
+            tx_from_mic = 0;
+            dac_restart_fifo(0); // the host fills it from here
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
         case CMD_IQ_STREAM_TX_STOP:
-            dac_stop();
-
+            tx_from_mic = 1;
+            dac_restart_fifo(DAC_PRIME_BLOCKS);
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
 
