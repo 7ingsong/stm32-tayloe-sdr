@@ -7,6 +7,7 @@
 #include "transport.h"
 #include "stm32f10x.h"
 #include "si5351.h"
+#include "audio.h"
 
 typedef struct __attribute__((packed)) {
     uint32_t overflow;
@@ -37,14 +38,20 @@ static int toggle = 0;
 
 static uint32_t lo_frequency = LO_FREQ_DEFAULT;
 
+// The ADC runs from boot for the I2S audio; RX_START/STOP only gate streaming it over USB
+static int rx_streaming = 0;
+
 void iq_set_frequency(uint32_t frequency) {
     lo_frequency = frequency;
     si5351_set_frequency((int32_t)frequency, SI5351_DRIVE_STRENGTH_2MA);
 }
 
 void on_adc(uint32_t *buf, int n){
-    int size = n * sizeof(uint32_t);
-    fifo_write(&fifo_adc, (uint8_t*)buf, size);
+    audio_process_adc(buf, n);
+
+    if (rx_streaming) {
+        fifo_write(&fifo_adc, (uint8_t*)buf, n * sizeof(uint32_t));
+    }
 
     toggle^=1;
 }
@@ -74,6 +81,7 @@ void iq_init() {
     
     dac_init();
     adc_init();
+    adc_start();
 }
 
 static void handle_ping(const frame_t* frame) {
@@ -122,11 +130,12 @@ void command_handler(const frame_t* frame) {
             break;
 
         case CMD_IQ_STREAM_RX_START:
-            adc_start();
+            fifo_adc.tail = fifo_adc.head; // start from fresh samples
+            rx_streaming = 1;
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
         case CMD_IQ_STREAM_RX_STOP:
-            adc_stop();
+            rx_streaming = 0;
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
 
