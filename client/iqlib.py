@@ -258,6 +258,8 @@ class DeviceClient:
                 break
             except TimeoutError:
                 continue
+        else:
+            raise TimeoutError(f"no RX frame within {timeout} s")
 
         if frame["cmd"] != RESP_IQ_STREAM_RX:
             raise ProtocolError(f"unexpected response 0x{frame['cmd']:02X} {frame['payload'].hex()}")

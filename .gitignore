@@ -6,3 +6,4 @@ build
 *.bin
 radio_iq_tx.py
 radio_iq.py
+radio_iq_sin.py

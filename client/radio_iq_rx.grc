@@ -11,7 +11,7 @@ options:
     gen_linking: dynamic
     generate_options: qt_gui
     hier_block_src_path: '.:'
-    id: radio_iq
+    id: radio_iq_rx
     max_nouts: '0'
     output_language: python
     placement: (0,0)
@@ -57,7 +57,7 @@ blocks:
     coordinate: [424, 32.0]
     rotation: 0
     state: enabled
-- name: values_freq
+- name: value
   id: variable_qtgui_range
   parameters:
     comment: ''
@@ -85,7 +85,7 @@ blocks:
     alias: ''
     amp: '1'
     comment: ''
-    freq: values_freq
+    freq: value
     maxoutbuf: '0'
     minoutbuf: '0'
     offset: '0'
@@ -150,30 +150,6 @@ blocks:
     bus_source: false
     bus_structure: null
     coordinate: [496, 228.0]
-    rotation: 0
-    state: enabled
-- name: low_pass_filter_0
-  id: low_pass_filter
-  parameters:
-    affinity: ''
-    alias: ''
-    beta: '6.76'
-    comment: ''
-    cutoff_freq: 3e3
-    decim: '1'
-    gain: '1'
-    interp: '1'
-    maxoutbuf: '2048'
-    minoutbuf: '0'
-    samp_rate: samp_rate
-    type: fir_filter_ccf
-    width: '1000'
-    win: window.WIN_HAMMING
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [632, 124.0]
     rotation: 0
     state: enabled
 - name: network_udp_source_0
@@ -305,9 +281,8 @@ blocks:
 connections:
 - [analog_sig_source_x_0, '0', blocks_multiply_xx_0, '1']
 - [blocks_complex_to_imag_0, '0', audio_sink_0, '0']
-- [blocks_multiply_xx_0, '0', low_pass_filter_0, '0']
+- [blocks_multiply_xx_0, '0', pfb_arb_resampler_xxx_0, '0']
 - [blocks_multiply_xx_0, '0', qtgui_freq_sink_x_0, '0']
-- [low_pass_filter_0, '0', pfb_arb_resampler_xxx_0, '0']
 - [network_udp_source_0, '0', blocks_multiply_xx_0, '0']
 - [pfb_arb_resampler_xxx_0, '0', blocks_complex_to_imag_0, '0']
 
