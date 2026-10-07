@@ -23,7 +23,9 @@ static int button_raw, button_state;
 static uint32_t button_changed_ms;
 
 static int display_ok, sending;
+#if UI_BLANK_ON_TX
 static int panel_on = 1;
+#endif
 static int render_step = -1; // >= 0 while a frame is being drawn piecewise
 static char freq_text[12];
 static uint32_t shown_freq;
@@ -139,8 +141,8 @@ void ui_poll(void) {
         return;
     }
 
-    // The OLED scans its rows ~300 times a second and its charge pump pulls that current from 3.3 V:
-    // the ripple reaches the mic preamp as a hum comb (312 Hz and harmonics, measured +17 dB). Blank it on TX.
+#if UI_BLANK_ON_TX
+    // See UI_BLANK_ON_TX in ui.h: the OLED row scan puts a hum comb into the mic, so blank it on TX
     if (iq_get_ptt() == panel_on) {
         panel_on = !iq_get_ptt();
         ssd1306_SetPower(panel_on);
@@ -149,6 +151,7 @@ void ui_poll(void) {
     if (!panel_on) {
         return;
     }
+#endif
 
     if (sending) {
         sending = !ssd1306_PollUpdate();

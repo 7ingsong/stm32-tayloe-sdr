@@ -16,10 +16,8 @@ static void audio_service(void) {
 int main() {
     si5351_init();
     si5351_clk2_8mhz();
-
     clock_init();
     I2C1_Config(); // si5351_init() set I2C timing up on the 8 MHz boot clock; redo it for PCLK1 = 36 MHz
-
     iq_set_frequency(LO_FREQ_DEFAULT);
 
     ui_init(); // OLED + encoder, before the streams start: bringing the display up blocks ~20 ms

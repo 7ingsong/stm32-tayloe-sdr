@@ -12,6 +12,13 @@
 #define UI_ENCODER_REVERSE 0
 #endif
 
+// 1 = switch the OLED off while transmitting. Its row scan (~312 Hz) pulls pulsed current from 3.3 V and
+// the ripple reached the mic preamp as a hum comb (+17 dB). Off by default while testing an RC filter on the
+// preamp supply; set to 1 if the hum is back.
+#ifndef UI_BLANK_ON_TX
+#define UI_BLANK_ON_TX 0
+#endif
+
 void ui_init(void);  // after clock_init() and iq_set_frequency(); blocks ~20 ms to bring up the display
 void ui_poll(void);  // every main-loop pass; never blocks for more than one ~0.5 ms I2C chunk
 
