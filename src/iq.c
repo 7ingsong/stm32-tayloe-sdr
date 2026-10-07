@@ -54,6 +54,10 @@ uint8_t iq_get_ptt(void) {
     return ptt;
 }
 
+void iq_set_ptt(uint8_t on) {
+    ptt = on ? 1 : 0;
+}
+
 #define RX_FRAMES_PER_PASS 4 // ~0.25 ms of checksums and copies
 
 #define DAC_PRIME_BLOCKS 2 // mic and DAC clocks are locked, so this fill level never drifts
@@ -159,7 +163,7 @@ static void handle_set_freq(const frame_t* frame) {
 // Empty payload: report; 1 byte: 0 = receive, 1 = transmit. ACK carries the state in effect.
 static void handle_ptt(const frame_t* frame) {
     if (frame->command.len == 1) {
-        ptt = frame->payload[0] ? 1 : 0;
+        iq_set_ptt(frame->payload[0]);
     } else if (frame->command.len != 0) {
         command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
         return;

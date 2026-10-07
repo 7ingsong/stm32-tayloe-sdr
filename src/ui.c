@@ -20,7 +20,8 @@ static int retune_pending;
 static uint32_t last_retune_ms;
 
 static int button_raw, button_state;
-static uint32_t button_changed_ms;
+static uint32_t button_changed_ms, button_pressed_ms;
+static int long_press_fired;
 
 static int display_ok, sending;
 #if UI_BLANK_ON_TX
@@ -104,7 +105,7 @@ void ui_init(void) {
 void ui_poll(void) {
     uint32_t now = get_ticks_ms();
 
-    // Push: next tuning step (debounced)
+    // Push (debounced): short = next tuning step on release, long = toggle RX/TX as soon as it's held long enough
     int down = EC11_ButtonDown();
     if (down != button_raw) {
         button_raw = down;
@@ -112,8 +113,15 @@ void ui_poll(void) {
     } else if (button_raw != button_state && now - button_changed_ms >= DEBOUNCE_MS) {
         button_state = button_raw;
         if (button_state) {
+            button_pressed_ms = now;
+            long_press_fired = 0;
+        } else if (!long_press_fired) {
             step = (step + 1) % N_STEPS;
         }
+    }
+    if (button_state && !long_press_fired && now - button_pressed_ms >= UI_LONG_PRESS_MS) {
+        iq_set_ptt(!iq_get_ptt());
+        long_press_fired = 1;
     }
 
     // Turn: tune

@@ -12,7 +12,7 @@ stream to GNU Radio over TCP.
 ## Features
 
 - **Local oscillator**: Si5351 over I²C, tuned to 10 MHz at boot and retunable at runtime with `CMD_SET_FREQ` (in `duplex.py`: type `f 7100000` while it runs).
-- **Front panel**: 0.91" SSD1306 OLED (128×32) on the same I²C bus as the Si5351, EC11 encoder on PA1/PA2 with its push switch on PA0 ([src/ui.c](src/ui.c)). Turn to tune by the current step, push to cycle the step 10 Hz → 1 MHz (underlined digit); the display also shows RX/TX and follows host commands.
+- **Front panel**: 0.91" SSD1306 OLED (128×32) on the same I²C bus as the Si5351, EC11 encoder on PA1/PA2 with its push switch on PA0 ([src/ui.c](src/ui.c)). Turn to tune by the current step, short push to cycle the step 10 Hz → 1 MHz (underlined digit), hold for 0.7 s to toggle RX/TX; the display also shows RX/TX and follows host commands.
   CLK2 outputs 8 MHz, which drives the MCU's HSE (bypass mode) → 72 MHz system clock via PLL.
 - **RX**: ADC1 + ADC2 in regular simultaneous mode (PA6 / PA7), DMA in circular mode,
   ≈142.857 kS/s (12 MHz ADC clock / 84 cycles). Samples are packed 2×12 bit into 32-bit words.
