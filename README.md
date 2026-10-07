@@ -107,8 +107,11 @@ Every packet, in both directions:
 | `CMD_PING` | `0x01` | `RESP_ACK` with `"PONG"` |
 | `CMD_IQ_STREAM_TX` | `0x31` | — (payload is appended to the DAC FIFO) |
 | `CMD_IQ_STREAM_TX_INFO` | `0x32` | `RESP_IQ_STREAM_TX_INFO` (`0xB2`): block size, free space, underrun / overflow counters |
-| `CMD_IQ_STREAM_TX_START` / `_STOP` | `0x33` / `0x34` | `RESP_ACK`. The DAC runs from boot, fed by the on-board mic SSB modulator (PA3 → USB, [src/ssb_tx.c](src/ssb_tx.c)); `START` hands the DAC to the host stream, `STOP` gives it back to the mic |
-| `CMD_IQ_STREAM_RX_START` / `_STOP` | `0x35` / `0x36` | `RESP_ACK`; while running, the device sends `RESP_IQ_STREAM_RX` (`0xB1`) frames of 256 bytes. The ADC itself runs from boot (it also feeds the I2S audio), these only gate the USB stream |
+| `CMD_IQ_STREAM_TX_START` / `_STOP` | `0x33` / `0x34` | `RESP_ACK`. The DAC runs from boot for the on-board radio (see `CMD_PTT`); `START` hands the DAC to the host stream (and idles the on-board radio), `STOP` gives it back |
+| `CMD_IQ_STREAM_RX_START` / `_STOP` | `0x35` / `0x36` | `RESP_ACK`; while running, the device sends `RESP_IQ_STREAM_RX` (`0xB1`) frames of 256 bytes. The ADC itself runs from boot (it also feeds the on-board SSB receiver on I2S, [src/ssb_rx.c](src/ssb_rx.c)), these only gate the USB stream |
+| `CMD_PTT` | `0x42` | On-board half-duplex radio. Payload `uint8`: `0` = receive (SSB demodulator on I2S, [src/ssb_rx.c](src/ssb_rx.c); DAC silent), `1` = transmit (mic on PA3 → SSB modulator → DAC, [src/ssb_tx.c](src/ssb_tx.c); I2S silent); empty = just read. Receive at boot. `RESP_ACK` with the state in effect |
+| `CMD_VOLUME` | `0x43` | On-board receiver volume. Payload `uint8` 0..255 (0 = mute, 8 ≈ −30 dBFS at full-scale input, each doubling +6 dB; 16 at boot), empty = just read. `RESP_ACK` with the volume |
+| `CMD_MIC_GAIN` | `0x44` | On-board transmitter mic gain. Payload `uint8` 0..255 (0 = silence, 16 ≈ full-scale mic → full-scale DAC, each doubling +6 dB; 16 at boot), empty = just read. `RESP_ACK` with the gain |
 | `CMD_SET_FREQ` | `0x40` | Payload: LO in Hz as `uint32` LE (1.4–100 MHz), or empty to just read it. `RESP_ACK` with the LO in effect as `uint32` LE; out of range → `ERR_BAD_PAYLOAD` |
 
 Errors come back as `RESP_ERR` (`0x81`) with `[error_code, detail]` — see [inc/command.h](inc/command.h) for the codes.

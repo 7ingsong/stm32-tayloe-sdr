@@ -7,7 +7,7 @@
 #include "transport.h"
 #include "stm32f10x.h"
 #include "si5351.h"
-#include "audio.h"
+#include "ssb_rx.h"
 #include "mic.h"
 #include "ssb_tx.h"
 
@@ -32,7 +32,7 @@ static fifo_t fifo_dac;
 static uint8_t fifo_buffer_dac[1024*20+1]; // ~80 ms at 64 kHz: headroom for host latency spikes
 
 static fifo_t fifo_adc;
-[[maybe_unused]]static uint8_t fifo_buffer_adc[1024*10+1];
+[[maybe_unused]]static uint8_t fifo_buffer_adc[1024*6+1]; // 24 RX frames: USB drains it quickly
 
 [[maybe_unused]]static uint8_t half = 0;
 
@@ -45,6 +45,10 @@ static int rx_streaming = 0;
 
 // The DAC runs from boot fed by the mic SSB modulator; TX_START hands it to the host, TX_STOP gives it back
 static int tx_from_mic = 1;
+
+// Half duplex for the on-board radio: 0 = receive (SSB RX on I2S, DAC silent), 1 = transmit (mic SSB on
+// the DAC, I2S silent). Only one of the two DSP chains runs at a time; the CPU can't afford both.
+static uint8_t ptt = 0;
 
 #define DAC_PRIME_BLOCKS 2 // mic and DAC clocks are locked, so this fill level never drifts
 
@@ -61,7 +65,14 @@ void on_mic(uint16_t *buf, int n) {
         return;
     }
     static uint32_t iq[MIC_N_SAMPLES / 2]; // 2 KB: keep it off the small stack
-    ssb_tx_process(buf, n, iq);
+    if (ptt) {
+        ssb_tx_process(buf, n, iq);
+    } else {
+        // Keep feeding the DAC so the fifo level (and thus the latency) stays put while receiving
+        for (int i = 0; i < n; i++) {
+            iq[i] = 0x08000800;
+        }
+    }
     fifo_write(&fifo_dac, (const uint8_t*)iq, n * sizeof(uint32_t));
 }
 
@@ -71,7 +82,9 @@ void iq_set_frequency(uint32_t frequency) {
 }
 
 void on_adc(uint32_t *buf, int n){
-    audio_process_adc(buf, n);
+    if (!ptt && tx_from_mic) { // half duplex: also idle while the host transmits (TX_START)
+        ssb_rx_process_adc(buf, n);
+    }
 
     if (rx_streaming) {
         fifo_write(&fifo_adc, (uint8_t*)buf, n * sizeof(uint32_t));
@@ -133,6 +146,41 @@ static void handle_set_freq(const frame_t* frame) {
     command_send(RESP_ACK, frame->command.seq, (const uint8_t*)&lo_frequency, sizeof(lo_frequency));
 }
 
+// Empty payload: report; 1 byte: 0 = receive, 1 = transmit. ACK carries the state in effect.
+static void handle_ptt(const frame_t* frame) {
+    if (frame->command.len == 1) {
+        ptt = frame->payload[0] ? 1 : 0;
+    } else if (frame->command.len != 0) {
+        command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
+        return;
+    }
+    command_send(RESP_ACK, frame->command.seq, &ptt, sizeof(ptt));
+}
+
+// Empty payload: report; 1 byte: set the on-board receiver volume (0 = mute, 255 max). ACK carries the volume.
+static void handle_volume(const frame_t* frame) {
+    if (frame->command.len == 1) {
+        ssb_rx_set_volume(frame->payload[0]);
+    } else if (frame->command.len != 0) {
+        command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
+        return;
+    }
+    uint8_t v = ssb_rx_get_volume();
+    command_send(RESP_ACK, frame->command.seq, &v, sizeof(v));
+}
+
+// Empty payload: report; 1 byte: set the on-board transmitter mic gain (0 = silence, 255 max). ACK carries the gain.
+static void handle_mic_gain(const frame_t* frame) {
+    if (frame->command.len == 1) {
+        ssb_tx_set_gain(frame->payload[0]);
+    } else if (frame->command.len != 0) {
+        command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
+        return;
+    }
+    uint8_t g = ssb_tx_get_gain();
+    command_send(RESP_ACK, frame->command.seq, &g, sizeof(g));
+}
+
 void command_handler(const frame_t* frame) {
     switch (frame->command.cmd) {
         case CMD_PING:
@@ -140,6 +188,15 @@ void command_handler(const frame_t* frame) {
             break;
         case CMD_SET_FREQ:
             handle_set_freq(frame);
+            break;
+        case CMD_PTT:
+            handle_ptt(frame);
+            break;
+        case CMD_VOLUME:
+            handle_volume(frame);
+            break;
+        case CMD_MIC_GAIN:
+            handle_mic_gain(frame);
             break;
         case CMD_IQ_STREAM_TX:
             fifo_write(&fifo_dac, frame->payload, frame->command.len);

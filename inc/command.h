@@ -23,6 +23,9 @@ enum {
     CMD_IQ_STREAM_RX_START = 0x35,
     CMD_IQ_STREAM_RX_STOP = 0x36,
     CMD_SET_FREQ = 0x40,
+    CMD_PTT = 0x42,
+    CMD_VOLUME = 0x43,
+    CMD_MIC_GAIN = 0x44,
 };
 
 enum {

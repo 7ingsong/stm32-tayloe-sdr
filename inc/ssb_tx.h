@@ -13,13 +13,17 @@
 #define SSB_TX_LSB 0
 #endif
 
-// DAC code = I or Q * SSB_TX_GAIN around mid-scale. A real tone keeps half its amplitude in each
-// of I and Q after the band-pass, so 2 maps a full-scale mic signal back to roughly full scale.
-#ifndef SSB_TX_GAIN
-#define SSB_TX_GAIN 2
+// Mic gain at boot (changeable with CMD_MIC_GAIN): DAC code = I or Q * gain / 128 around mid-scale.
+// A real tone keeps half its amplitude in each of I and Q after the band-pass, so 16 maps a full-scale
+// mic signal back to roughly full scale. Each doubling is +6 dB, 0 transmits silence.
+#ifndef SSB_TX_GAIN_DEFAULT
+#define SSB_TX_GAIN_DEFAULT 16
 #endif
 
 // n mic samples (12-bit right-aligned, n a multiple of 8) -> n DAC words (I low half, Q high half)
 void ssb_tx_process(const uint16_t *mic, int n, uint32_t *dac);
+
+void ssb_tx_set_gain(uint8_t gain);
+uint8_t ssb_tx_get_gain(void);
 
 #endif

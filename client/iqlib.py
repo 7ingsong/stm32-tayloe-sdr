@@ -18,6 +18,9 @@ CMD_IQ_STREAM_TX_STOP = 0x34
 CMD_IQ_STREAM_RX_START = 0x35
 CMD_IQ_STREAM_RX_STOP = 0x36
 CMD_SET_FREQ = 0x40
+CMD_PTT = 0x42
+CMD_VOLUME = 0x43
+CMD_MIC_GAIN = 0x44
 
 RESP_ACK = 0x80
 RESP_ERR = 0x81
@@ -251,6 +254,21 @@ class DeviceClient:
         payload = b"" if hz is None else struct.pack("<I", int(hz))
         resp = self.req_command(CMD_SET_FREQ, cmd_resp=RESP_ACK, payload=payload)
         return struct.unpack("<I", resp)[0]
+
+    def set_ptt(self, on=None):
+        """On-board radio: True = transmit from the mic, False = receive on I2S, None = just read. Returns the state."""
+        payload = b"" if on is None else bytes([1 if on else 0])
+        return bool(self.req_command(CMD_PTT, cmd_resp=RESP_ACK, payload=payload)[0])
+
+    def set_volume(self, volume=None):
+        """On-board receiver volume 0..255 (0 = mute, each doubling +6 dB), None = just read. Returns the volume."""
+        payload = b"" if volume is None else bytes([int(volume)])
+        return self.req_command(CMD_VOLUME, cmd_resp=RESP_ACK, payload=payload)[0]
+
+    def set_mic_gain(self, gain=None):
+        """On-board transmitter mic gain 0..255 (0 = silence, each doubling +6 dB), None = just read. Returns the gain."""
+        payload = b"" if gain is None else bytes([int(gain)])
+        return self.req_command(CMD_MIC_GAIN, cmd_resp=RESP_ACK, payload=payload)[0]
 
     def cmd_iq_stream_tx_info(self, payload=bytes()):
         resp = self.req_command(CMD_IQ_STREAM_TX_INFO, cmd_resp=RESP_IQ_STREAM_TX_INFO, payload=payload)
