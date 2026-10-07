@@ -23,6 +23,7 @@ static int button_raw, button_state;
 static uint32_t button_changed_ms;
 
 static int display_ok, sending;
+static int panel_on = 1;
 static int render_step = -1; // >= 0 while a frame is being drawn piecewise
 static char freq_text[12];
 static uint32_t shown_freq;
@@ -137,6 +138,18 @@ void ui_poll(void) {
     if (!display_ok) {
         return;
     }
+
+    // The OLED scans its rows ~300 times a second and its charge pump pulls that current from 3.3 V:
+    // the ripple reaches the mic preamp as a hum comb (312 Hz and harmonics, measured +17 dB). Blank it on TX.
+    if (iq_get_ptt() == panel_on) {
+        panel_on = !iq_get_ptt();
+        ssd1306_SetPower(panel_on);
+        shown_ptt = -1; // redraw when it comes back
+    }
+    if (!panel_on) {
+        return;
+    }
+
     if (sending) {
         sending = !ssd1306_PollUpdate();
     } else if (render_step >= 0) {

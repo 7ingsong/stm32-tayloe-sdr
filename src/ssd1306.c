@@ -228,6 +228,14 @@ char ssd1306_WriteString(const char* str, FontDef Font, SSD1306_COLOR color)
 }
 
 //
+//  Panel on/off: while off the controller stops scanning, so it draws no pulsed current
+//
+void ssd1306_SetPower(int on)
+{
+    ssd1306_WriteCommand(on ? 0xAF : 0xAE);
+}
+
+//
 //  Invert background/foreground colors
 //
 void ssd1306_InvertColors(void)
