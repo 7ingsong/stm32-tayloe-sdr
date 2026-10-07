@@ -3,6 +3,7 @@
 #include "i2s.h"
 #include "si5351.h"
 #include "mic.h"
+#include "ssb_rx.h"
 
 int main() {
     si5351_init();
@@ -24,6 +25,7 @@ int main() {
         iq_dispatch();
         i2s_dispatch();
         mic_dispatch();
+        ssb_rx_poll();
     }
 
     return 0;

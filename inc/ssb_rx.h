@@ -19,8 +19,10 @@
 #define SSB_RX_VOLUME_DEFAULT 16
 #endif
 
-// n ADC DMA words (I low half-word, Q high), n a multiple of 8
+// Queue n ADC DMA words (I low half-word, Q high); the buffer must stay valid until ssb_rx_poll() drained it
 void ssb_rx_process_adc(const uint32_t *buf, int n);
+// Demodulate the next small chunk of the queued block; call every main-loop pass
+void ssb_rx_poll(void);
 
 void ssb_rx_set_volume(uint8_t volume);
 uint8_t ssb_rx_get_volume(void);

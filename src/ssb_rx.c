@@ -44,8 +44,17 @@ uint8_t ssb_rx_get_volume(void) {
     return volume;
 }
 
-// Called from the main loop with each ADC DMA half-buffer: low half-word = ADC1 (I), high = ADC2 (Q)
-void ssb_rx_process_adc(const uint32_t *buf, int n) {
+/*
+ * A whole ADC block takes ~2.5 ms to demodulate, close to the 2.6 ms I2S half-buffer: with USB streaming on top,
+ * I2S refills came late and replayed stale audio (clicks). So the block is only queued here and
+ * ssb_rx_poll() works through it in small chunks; the DMA leaves that half alone for the next 8 ms.
+ */
+#define POLL_CHUNK 64
+
+static const uint32_t *queued_buf;
+static int queued_n;
+
+static void demodulate(const uint32_t *buf, int n) {
     for (int i = 0; i < n; i++) {
         const int16_t *xai = fir_push(&ai, (int16_t)(((int32_t)(buf[i] & 0xFFFF) - 2048) << 4));
         const int16_t *xaq = fir_push(&aq, (int16_t)(((int32_t)(buf[i] >> 16) - 2048) << 4));
@@ -70,6 +79,25 @@ void ssb_rx_process_adc(const uint32_t *buf, int n) {
 #endif
         ring[ring_w++ & RING_MASK] = sat16(audio);
     }
+}
+
+// Called from the main loop with each ADC DMA half-buffer: low half-word = ADC1 (I), high = ADC2 (Q)
+void ssb_rx_process_adc(const uint32_t *buf, int n) {
+    if (queued_n > 0) {
+        demodulate(queued_buf, queued_n); // previous block not finished (shouldn't happen): finish it now
+    }
+    queued_buf = buf;
+    queued_n = n;
+}
+
+void ssb_rx_poll(void) {
+    if (queued_n == 0) {
+        return;
+    }
+    int n = queued_n < POLL_CHUNK ? queued_n : POLL_CHUNK;
+    demodulate(queued_buf, n);
+    queued_buf += n;
+    queued_n -= n;
 }
 
 static int32_t resample_next(void) {
