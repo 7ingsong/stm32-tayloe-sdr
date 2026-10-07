@@ -50,6 +50,12 @@ static int tx_from_mic = 1;
 // the DAC, I2S silent). Only one of the two DSP chains runs at a time; the CPU can't afford both.
 static uint8_t ptt = 0;
 
+uint8_t iq_get_ptt(void) {
+    return ptt;
+}
+
+#define RX_FRAMES_PER_PASS 4 // ~0.25 ms of checksums and copies
+
 #define DAC_PRIME_BLOCKS 2 // mic and DAC clocks are locked, so this fill level never drifts
 
 static void dac_restart_fifo(int prime_blocks) {
@@ -79,6 +85,10 @@ void on_mic(uint16_t *buf, int n) {
 void iq_set_frequency(uint32_t frequency) {
     lo_frequency = frequency;
     si5351_set_frequency((int32_t)frequency, SI5351_DRIVE_STRENGTH_2MA);
+}
+
+uint32_t iq_get_frequency(void) {
+    return lo_frequency;
 }
 
 void on_adc(uint32_t *buf, int n){
@@ -247,8 +257,10 @@ void iq_dispatch() {
 
     static uint8_t iq_usb_stream_seq = 0;
     uint8_t buf[FRAME_MAX_PAYLOAD];
-    // Drain every ready RX frame while USB has room; one per loop is too slow when TX traffic is parsed too
-    while (fifo_get_filled(&fifo_adc) >= FRAME_MAX_PAYLOAD &&
+    // Drain ready RX frames while USB has room: more than one per pass (one is too slow when TX traffic is
+    // parsed too), but bounded, or a backlog after a host stall blocks the loop for ms and the I2S refill is late
+    int budget = RX_FRAMES_PER_PASS;
+    while (budget-- > 0 && fifo_get_filled(&fifo_adc) >= FRAME_MAX_PAYLOAD &&
            transport_get_tx_free_space() >= PACKAGE_HEADER_SIZE + FRAME_MAX_PAYLOAD) {
         fifo_read(&fifo_adc, buf, FRAME_MAX_PAYLOAD);
         command_send(RESP_IQ_STREAM_RX, iq_usb_stream_seq++, buf, FRAME_MAX_PAYLOAD);

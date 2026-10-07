@@ -79,6 +79,9 @@ int si5351_SetupOutput(uint8_t output, si5351PLL_t pllSource, si5351DriveStrengt
 
 void si5351_init();
 void si5351_clk2_8mhz();
+// Queues the I/Q LO retune; si5351_poll() writes it out in short I2C bursts from the main loop
 void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength);
+void si5351_set_frequency_blocking(int32_t frequency, si5351DriveStrength_t strength);
+int si5351_poll(void); // 1 when nothing is pending
 
 #endif

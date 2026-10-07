@@ -29,8 +29,7 @@
 
 // SSD1306 LCD height in pixels
 #ifndef SSD1306_HEIGHT
-#define SSD1306_HEIGHT          64
-//#define SSD1306_HEIGHT          32
+#define SSD1306_HEIGHT          32 // 0.91" 128x32 module
 #endif // SSD1306_HEIGHT
 
 #ifndef SSD1306_COM_LR_REMAP
@@ -38,8 +37,7 @@
 #endif // SSD1306_COM_LR_REMAP
 
 #ifndef SSD1306_COM_ALTERNATIVE_PIN_CONFIG
-//#define SSD1306_COM_ALTERNATIVE_PIN_CONFIG    0
-#define SSD1306_COM_ALTERNATIVE_PIN_CONFIG    1
+#define SSD1306_COM_ALTERNATIVE_PIN_CONFIG    0 // sequential COM pins for 128x32 (1 for 128x64)
 #endif // SSD1306_COM_ALTERNATIVE_PIN_CONFIG
 
 
@@ -66,7 +64,10 @@ typedef struct {
 //
 
 uint8_t ssd1306_Init();
-void ssd1306_UpdateScreen();
+void ssd1306_UpdateScreen(); // blocking: ~12 ms of I2C, use only at startup
+// Non-blocking refresh for the main loop: start, then call poll until it returns 1 (16 bytes per call)
+void ssd1306_StartUpdate(void);
+int ssd1306_PollUpdate(void);
 void ssd1306_Fill(SSD1306_COLOR color);
 void ssd1306_DrawPixel(uint8_t x, uint8_t y, SSD1306_COLOR color);
 char ssd1306_WriteChar(char ch, FontDef Font, SSD1306_COLOR color);

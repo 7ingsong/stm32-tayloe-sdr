@@ -368,8 +368,40 @@ void si5351_EnableOutputs(uint8_t enabled) {
     si5351_write(SI5351_REGISTER_3_OUTPUT_ENABLE_CONTROL, ~enabled);
 }
 
+/*
+ * A full retune is ~30 register writes (~2.7 ms of blocking I2C), longer than the 2.6 ms I2S half-buffer.
+ * si5351_set_frequency() therefore only records the writes; si5351_poll() sends them from the main loop,
+ * one burst of consecutive registers (auto-increment, <= 0.25 ms) per call, in the original order.
+ */
+#define QUEUE_MAX 48
+
+static uint8_t queue_reg[QUEUE_MAX], queue_val[QUEUE_MAX];
+static int queue_len, queue_pos, recording;
+
 void si5351_write(uint8_t reg, uint8_t value) {
+    if (recording) {
+        if (queue_len < QUEUE_MAX) {
+            queue_reg[queue_len] = reg;
+            queue_val[queue_len] = value;
+            queue_len++;
+        }
+        return;
+    }
     I2C_WriteByte(SI5351_ADDRESS, reg, value);
+}
+
+int si5351_poll(void) {
+    if (queue_pos >= queue_len) {
+        return 1;
+    }
+    uint8_t burst[1 + 8];
+    int start = queue_pos, n = 0;
+    burst[0] = queue_reg[start];
+    while (queue_pos < queue_len && n < 8 && queue_reg[queue_pos] == queue_reg[start] + n) {
+        burst[1 + n++] = queue_val[queue_pos++];
+    }
+    I2C_Write(SI5351_ADDRESS, burst, 1 + n);
+    return queue_pos >= queue_len;
 }
 
 // Common code for _SetupPLL and _SetupOutput
@@ -404,7 +436,12 @@ void si5351_clk2_8mhz() {
     si5351_EnableOutputs(enable);
 }
 
+// Queues the retune (restarting any retune still in flight); si5351_poll() applies it
 void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength) {
+    recording = 1;
+    queue_len = 0;
+    queue_pos = 0;
+
     si5351PLLConfig_t pll_conf;
     si5351OutputConfig_t out_conf;
 
@@ -433,4 +470,10 @@ void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength) {
 
     int enable = (1<<0)|(1<<1)|(1<<2);
     si5351_EnableOutputs(enable);
+    recording = 0;
+}
+
+void si5351_set_frequency_blocking(int32_t frequency, si5351DriveStrength_t strength) {
+    si5351_set_frequency(frequency, strength);
+    while (!si5351_poll());
 }

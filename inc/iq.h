@@ -10,5 +10,7 @@
 void iq_init();
 void iq_dispatch();
 void iq_set_frequency(uint32_t frequency);
+uint32_t iq_get_frequency(void);
+uint8_t iq_get_ptt(void);
 
 #endif

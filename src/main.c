@@ -4,14 +4,25 @@
 #include "si5351.h"
 #include "mic.h"
 #include "ssb_rx.h"
+#include "i2c.h"
+#include "ui.h"
+
+// The I2S half-buffer is only 2.6 ms: refill it (and demodulate the next chunk) between every other step
+static void audio_service(void) {
+    i2s_dispatch();
+    ssb_rx_poll();
+}
 
 int main() {
     si5351_init();
     si5351_clk2_8mhz();
 
     clock_init();
+    I2C1_Config(); // si5351_init() set I2C timing up on the 8 MHz boot clock; redo it for PCLK1 = 36 MHz
 
     iq_set_frequency(LO_FREQ_DEFAULT);
+
+    ui_init(); // OLED + encoder, before the streams start: bringing the display up blocks ~20 ms
 
     iq_init();
 
@@ -23,9 +34,13 @@ int main() {
 
     while (1){
         iq_dispatch();
-        i2s_dispatch();
+        audio_service();
         mic_dispatch();
-        ssb_rx_poll();
+        audio_service();
+        ui_poll();
+        audio_service();
+        si5351_poll();
+        audio_service();
     }
 
     return 0;

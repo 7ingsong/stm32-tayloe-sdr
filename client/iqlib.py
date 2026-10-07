@@ -208,7 +208,11 @@ class DeviceClient:
         self.serial.write(build_frame(cmd, seq, payload))
 
         while True:
-            response = self.read_frame()
+            try:
+                response = self.read_frame()
+            except ProtocolError:
+                # reset_input_buffer() above can cut a streamed RX frame in half: skip the fragment
+                continue
 
             if response["cmd"] == RESP_IQ_STREAM_RX:
                 continue
