@@ -16,8 +16,7 @@ static uint8_t ssd1306_WriteCommand(uint8_t command)
     uint8_t data[2];
     data[0] = 0x00;  // Control byte: Co = 0, D/C# = 0 (command)
     data[1] = command;
-    I2C_Write(SSD1306_I2C_ADDR, data, 2);
-    return 0;
+    return (uint8_t)I2C_Write(SSD1306_I2C_ADDR, data, 2);
 }
 
 
@@ -32,7 +31,7 @@ uint8_t ssd1306_Init()
     // Init LCD
     status += ssd1306_WriteCommand(0xAE);   // Display off
     status += ssd1306_WriteCommand(0x20);   // Set Memory Addressing Mode
-    status += ssd1306_WriteCommand(0x10);   // 00,Horizontal Addressing Mode;01,Vertical Addressing Mode;10,Page Addressing Mode (RESET);11,Invalid
+    status += ssd1306_WriteCommand(0x00);   // Horizontal: the whole frame streams as one run (see ssd1306_StartUpdate)
     status += ssd1306_WriteCommand(0xB0);   // Set Page Start Address for Page Addressing Mode,0-7
     status += ssd1306_WriteCommand(0xC8);   // Set COM Output Scan Direction
     status += ssd1306_WriteCommand(0x00);   // Set low column address
@@ -97,27 +96,39 @@ void ssd1306_Fill(SSD1306_COLOR color)
 }
 
 //
-//  Write the screenbuffer with changed to the screen
+//  Send the screenbuffer in small chunks so the main loop never blocks for long
 //
+#define UPDATE_CHUNK 16 // ~0.45 ms of I2C at 400 kHz
+
+static uint16_t update_pos = sizeof(SSD1306_Buffer); // == size: idle
+
+void ssd1306_StartUpdate(void)
+{
+    // Column 0..127, pages 0..H/8-1: the data pointer then walks the whole buffer and wraps
+    static const uint8_t window[] = {0x00, 0x21, 0, SSD1306_WIDTH - 1, 0x22, 0, SSD1306_HEIGHT / 8 - 1};
+    I2C_Write(SSD1306_I2C_ADDR, window, sizeof(window));
+    update_pos = 0;
+}
+
+int ssd1306_PollUpdate(void)
+{
+    if (update_pos >= sizeof(SSD1306_Buffer)) {
+        return 1;
+    }
+    uint8_t data[UPDATE_CHUNK + 1];
+    data[0] = 0x40; // Control byte: Co = 0, D/C# = 1 (data)
+    for (int j = 0; j < UPDATE_CHUNK; j++) {
+        data[j + 1] = SSD1306_Buffer[update_pos + j];
+    }
+    I2C_Write(SSD1306_I2C_ADDR, data, sizeof(data));
+    update_pos += UPDATE_CHUNK;
+    return update_pos >= sizeof(SSD1306_Buffer);
+}
+
 void ssd1306_UpdateScreen()
 {
-    uint8_t i;
-
-    for (i = 0; i < 8; i++) {
-        ssd1306_WriteCommand(0xB0 + i);
-        ssd1306_WriteCommand(0x00);
-        ssd1306_WriteCommand(0x10);
-
-        //HAL_I2C_Mem_Write(SSD1306_I2C_ADDR, 0x40, 1, &SSD1306_Buffer[SSD1306_WIDTH * i], SSD1306_WIDTH, 100);
-
-        uint8_t data[SSD1306_WIDTH + 1];
-        data[0] = 0x40; // Control byte: Co = 0, D/C# = 1 (data)
-        for (uint8_t j = 0; j < SSD1306_WIDTH; j++) {
-            data[j + 1] = SSD1306_Buffer[i * SSD1306_WIDTH + j];
-        }
-        I2C_Write(SSD1306_I2C_ADDR, data, SSD1306_WIDTH + 1);
-
-    }
+    ssd1306_StartUpdate();
+    while (!ssd1306_PollUpdate());
 }
 
 //
@@ -214,6 +225,14 @@ char ssd1306_WriteString(const char* str, FontDef Font, SSD1306_COLOR color)
 
     // Everything ok
     return *str;
+}
+
+//
+//  Panel on/off: while off the controller stops scanning, so it draws no pulsed current
+//
+void ssd1306_SetPower(int on)
+{
+    ssd1306_WriteCommand(on ? 0xAF : 0xAE);
 }
 
 //

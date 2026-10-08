@@ -18,6 +18,10 @@ CMD_IQ_STREAM_TX_STOP = 0x34
 CMD_IQ_STREAM_RX_START = 0x35
 CMD_IQ_STREAM_RX_STOP = 0x36
 CMD_SET_FREQ = 0x40
+CMD_PTT = 0x42
+CMD_VOLUME = 0x43
+CMD_MIC_GAIN = 0x44
+CMD_SPECTRUM = 0x45
 
 RESP_ACK = 0x80
 RESP_ERR = 0x81
@@ -205,7 +209,11 @@ class DeviceClient:
         self.serial.write(build_frame(cmd, seq, payload))
 
         while True:
-            response = self.read_frame()
+            try:
+                response = self.read_frame()
+            except ProtocolError:
+                # reset_input_buffer() above can cut a streamed RX frame in half: skip the fragment
+                continue
 
             if response["cmd"] == RESP_IQ_STREAM_RX:
                 continue
@@ -251,6 +259,34 @@ class DeviceClient:
         payload = b"" if hz is None else struct.pack("<I", int(hz))
         resp = self.req_command(CMD_SET_FREQ, cmd_resp=RESP_ACK, payload=payload)
         return struct.unpack("<I", resp)[0]
+
+    def set_ptt(self, on=None):
+        """On-board radio: True = transmit from the mic, False = receive on I2S, None = just read. Returns the state."""
+        payload = b"" if on is None else bytes([1 if on else 0])
+        return bool(self.req_command(CMD_PTT, cmd_resp=RESP_ACK, payload=payload)[0])
+
+    def set_volume(self, volume=None):
+        """On-board receiver volume 0..255 (0 = mute, each doubling +6 dB), None = just read. Returns the volume."""
+        payload = b"" if volume is None else bytes([int(volume)])
+        return self.req_command(CMD_VOLUME, cmd_resp=RESP_ACK, payload=payload)[0]
+
+    def set_mic_gain(self, gain=None):
+        """On-board transmitter mic gain 0..255 (0 = silence, each doubling +6 dB), None = just read. Returns the gain."""
+        payload = b"" if gain is None else bytes([int(gain)])
+        return self.req_command(CMD_MIC_GAIN, cmd_resp=RESP_ACK, payload=payload)[0]
+
+    def set_spectrum(self, rise=None, fall=None, smooth=None):
+        """TFT spectrum smoothing. rise/fall: 0..7 (each frame a bin moves 1/2^n of the way; 0 = jump, higher =
+        calmer), smooth: average neighbouring bins (bool). Arguments left as None keep the current value.
+        Returns (rise, fall, smooth) in effect."""
+        cur = self.req_command(CMD_SPECTRUM, cmd_resp=RESP_ACK)
+        if rise is None and fall is None and smooth is None:
+            return cur[0], cur[1], bool(cur[2])
+        new = bytes([cur[0] if rise is None else int(rise),
+                     cur[1] if fall is None else int(fall),
+                     cur[2] if smooth is None else (1 if smooth else 0)])
+        resp = self.req_command(CMD_SPECTRUM, cmd_resp=RESP_ACK, payload=new)
+        return resp[0], resp[1], bool(resp[2])
 
     def cmd_iq_stream_tx_info(self, payload=bytes()):
         resp = self.req_command(CMD_IQ_STREAM_TX_INFO, cmd_resp=RESP_IQ_STREAM_TX_INFO, payload=payload)

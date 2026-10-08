@@ -12,6 +12,7 @@ stream to GNU Radio over TCP.
 ## Features
 
 - **Local oscillator**: Si5351 over I²C, tuned to 10 MHz at boot and retunable at runtime with `CMD_SET_FREQ` (in `duplex.py`: type `f 7100000` while it runs).
+- **Front panel**: 0.91" SSD1306 OLED (128×32) on the same I²C bus as the Si5351, EC11 encoder on PA1/PA2 with its push switch on PA0 ([src/ui.c](src/ui.c)). Turn to tune by the current step, short push to cycle the step 10 Hz → 1 MHz (underlined digit), hold for 0.7 s to toggle RX/TX; the display also shows RX/TX and follows host commands.
   CLK2 outputs 8 MHz, which drives the MCU's HSE (bypass mode) → 72 MHz system clock via PLL.
 - **RX**: ADC1 + ADC2 in regular simultaneous mode (PA6 / PA7), DMA in circular mode,
   ≈142.857 kS/s (12 MHz ADC clock / 84 cycles). Samples are packed 2×12 bit into 32-bit words.
@@ -107,8 +108,12 @@ Every packet, in both directions:
 | `CMD_PING` | `0x01` | `RESP_ACK` with `"PONG"` |
 | `CMD_IQ_STREAM_TX` | `0x31` | — (payload is appended to the DAC FIFO) |
 | `CMD_IQ_STREAM_TX_INFO` | `0x32` | `RESP_IQ_STREAM_TX_INFO` (`0xB2`): block size, free space, underrun / overflow counters |
-| `CMD_IQ_STREAM_TX_START` / `_STOP` | `0x33` / `0x34` | `RESP_ACK` |
-| `CMD_IQ_STREAM_RX_START` / `_STOP` | `0x35` / `0x36` | `RESP_ACK`; while running, the device sends `RESP_IQ_STREAM_RX` (`0xB1`) frames of 256 bytes |
+| `CMD_IQ_STREAM_TX_START` / `_STOP` | `0x33` / `0x34` | `RESP_ACK`. The DAC runs from boot for the on-board radio (see `CMD_PTT`); `START` hands the DAC to the host stream (and idles the on-board radio), `STOP` gives it back |
+| `CMD_IQ_STREAM_RX_START` / `_STOP` | `0x35` / `0x36` | `RESP_ACK`; while running, the device sends `RESP_IQ_STREAM_RX` (`0xB1`) frames of 256 bytes. The ADC itself runs from boot (it also feeds the on-board SSB receiver on I2S, [src/ssb_rx.c](src/ssb_rx.c)), these only gate the USB stream |
+| `CMD_PTT` | `0x42` | On-board half-duplex radio. Payload `uint8`: `0` = receive (SSB demodulator on I2S, [src/ssb_rx.c](src/ssb_rx.c); DAC silent), `1` = transmit (mic on PA3 → SSB modulator → DAC, [src/ssb_tx.c](src/ssb_tx.c); I2S silent); empty = just read. Receive at boot. `RESP_ACK` with the state in effect |
+| `CMD_VOLUME` | `0x43` | On-board receiver volume. Payload `uint8` 0..255 (0 = mute, 8 ≈ −30 dBFS at full-scale input, each doubling +6 dB; 16 at boot), empty = just read. `RESP_ACK` with the volume |
+| `CMD_MIC_GAIN` | `0x44` | On-board transmitter mic gain. Payload `uint8` 0..255 (0 = silence, 16 ≈ full-scale mic → full-scale DAC, each doubling +6 dB; 16 at boot), empty = just read. `RESP_ACK` with the gain |
+| `CMD_SPECTRUM` | `0x45` | TFT spectrum smoothing. Payload `[rise_shift, fall_shift, smooth_bins]` (shifts 0..7: each frame a bin moves 1/2^n of the way to its new level, 0 = jump; smooth_bins 0/1 = average neighbouring bins 1-2-1), empty = just read. `RESP_ACK` with the values in effect |
 | `CMD_SET_FREQ` | `0x40` | Payload: LO in Hz as `uint32` LE (1.4–100 MHz), or empty to just read it. `RESP_ACK` with the LO in effect as `uint32` LE; out of range → `ERR_BAD_PAYLOAD` |
 
 Errors come back as `RESP_ERR` (`0x81`) with `[error_code, detail]` — see [inc/command.h](inc/command.h) for the codes.

@@ -1,6 +1,7 @@
 #include "utils.h"
 #include <stm32f10x_rcc.h>
 #include <stm32f10x_gpio.h>
+#include <stm32f10x_flash.h>
 #include "config.h"
 volatile uint32_t ms_ticks = 0;  // Counter for milliseconds
 
@@ -23,6 +24,12 @@ void clock_init(){
     RCC_PCLK2Config(RCC_HCLK_Div1); /// PCLK2 = HCLK
     RCC_PCLK1Config(RCC_HCLK_Div2); /// PCLK1 = HCLK/2
     RCC_PLLConfig(RCC_PLLSource_HSE_Div1, RCC_PLLMul_9); /// PLLCLK = 8MHz * 9 = 72 MHz
+
+    // 72 MHz needs 2 flash wait states. Don't rely on SystemInit() for this: it only sets them when the HSE
+    // is already running, which after power-on it isn't (the Si5351 CLK2 is programmed later, in main).
+    // With 0 wait states the core fetched garbage right after the switch and locked up in a HardFault.
+    FLASH_PrefetchBufferCmd(FLASH_PrefetchBuffer_Enable);
+    FLASH_SetLatency(FLASH_Latency_2);
 
     RCC_PLLCmd(ENABLE); // Enable PLL
     while(RCC_GetFlagStatus(RCC_FLAG_PLLRDY) == RESET); /// Wait till PLL is ready

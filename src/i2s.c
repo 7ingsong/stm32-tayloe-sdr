@@ -27,6 +27,9 @@ static uint16_t samples[I2S_N_SAMPLES];
 
 static volatile uint8_t pending_mask = 0;
 
+// Half-buffers the main loop didn't refill before the DMA came back to them (heard as clicks)
+volatile uint32_t i2s_overruns = 0;
+
 __attribute__((weak)) void on_i2s(uint16_t *buf, int n) {}
 
 #if I2S_RX
@@ -35,11 +38,13 @@ void DMA2_Channel1_IRQHandler(void) {
 void DMA2_Channel2_IRQHandler(void) {
 #endif
     if (DMA_GetITStatus(I2S_DMA_IT_HT) != RESET) {
+        if (pending_mask & I2S_PENDING_HALF0) i2s_overruns++;
         pending_mask |= I2S_PENDING_HALF0;
         DMA_ClearITPendingBit(I2S_DMA_IT_HT);
     }
 
     if (DMA_GetITStatus(I2S_DMA_IT_TC) != RESET) {
+        if (pending_mask & I2S_PENDING_HALF1) i2s_overruns++;
         pending_mask |= I2S_PENDING_HALF1;
         DMA_ClearITPendingBit(I2S_DMA_IT_TC);
     }
@@ -143,11 +148,14 @@ void i2s_dispatch() {
     pending_mask = 0;
     __enable_irq();
 
+    // DMA position: if it is already back inside the half we are about to refill, we were too late
     if (mask & I2S_PENDING_HALF0) {
+        if (I2S_N_SAMPLES - DMA_GetCurrDataCounter(I2S_DMA_CHANNEL) < I2S_N_SAMPLES/2) i2s_overruns++;
         on_i2s(&samples[0], I2S_N_SAMPLES/2);
     }
 
     if (mask & I2S_PENDING_HALF1) {
+        if (I2S_N_SAMPLES - DMA_GetCurrDataCounter(I2S_DMA_CHANNEL) >= I2S_N_SAMPLES/2) i2s_overruns++;
         on_i2s(&samples[I2S_N_SAMPLES/2], I2S_N_SAMPLES/2);
     }
 }
