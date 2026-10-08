@@ -22,8 +22,20 @@ static uint8_t stripe[STRIPE * W / 2]; // RGB111: 2 pixels per byte
 static uint8_t wf_row[W * 3];          // RGB666
 static int32_t floor_q4 = DB_Q4(80);
 
+static spectrum_smoothing_t smoothing = {SPECTRUM_RISE_SHIFT, SPECTRUM_FALL_SHIFT, SPECTRUM_SMOOTH_BINS};
+
 static int capture_count, fft_stage, stripe_y;
 static uint16_t wf_line = WF_TOP; // GRAM line currently shown at the top of the waterfall
+
+void spectrum_set_smoothing(spectrum_smoothing_t s) {
+    smoothing.rise_shift = s.rise_shift > SPECTRUM_SHIFT_MAX ? SPECTRUM_SHIFT_MAX : s.rise_shift;
+    smoothing.fall_shift = s.fall_shift > SPECTRUM_SHIFT_MAX ? SPECTRUM_SHIFT_MAX : s.fall_shift;
+    smoothing.smooth_bins = s.smooth_bins ? 1 : 0;
+}
+
+spectrum_smoothing_t spectrum_get_smoothing(void) {
+    return smoothing;
+}
 
 void spectrum_init(void) {
     ili9488_fill_rect(0, 0, ILI9488_WIDTH, ILI9488_HEIGHT, 0, 0, 0);
@@ -78,20 +90,34 @@ static uint16_t log2_q4(uint64_t p) {
     return (uint16_t)(msb * 16 + frac);
 }
 
+// Level of bin b, optionally averaged with its neighbours (1-2-1)
+static int32_t smoothed_bin(int b) {
+    if (!smoothing.smooth_bins) {
+        return bin_level[b];
+    }
+    int32_t l = bin_level[b > 0 ? b - 1 : b], r = bin_level[b < FFT_N - 1 ? b + 1 : b];
+    return (l + 2 * bin_level[b] + r) / 4;
+}
+
 static void compute_levels(void) {
     int32_t sum = 0;
     for (int b = 0; b < FFT_N; b++) {
         int k = (b + FFT_N / 2) & (FFT_N - 1); // fftshift: negative frequencies on the left
         uint64_t p = (uint64_t)((int64_t)re[k] * re[k]) + (uint64_t)((int64_t)im[k] * im[k]);
         int32_t level = log2_q4(p);
-        bin_level[b] += (level - bin_level[b]) / 2; // light smoothing between frames
+        int32_t delta = level - (int32_t)bin_level[b];
+        bin_level[b] += delta / (1 << (delta > 0 ? smoothing.rise_shift : smoothing.fall_shift)); // fast up, slow down
         sum += bin_level[b];
     }
     int32_t target = sum / FFT_N - FLOOR_BELOW; // most bins are noise: track it so no level setup is needed
     floor_q4 += (target - floor_q4) / 8;
 
     for (int x = 0; x < W; x++) {
-        int32_t v = bin_level[x * FFT_N / W] - floor_q4;
+        // Screen columns sit between bins (256 -> 320): interpolate instead of repeating a bin as a step
+        int32_t pos = x * (FFT_N - 1) * 256 / (W - 1); // bin position, 8 fractional bits
+        int b = pos >> 8, frac = pos & 255;
+        int32_t lo = smoothed_bin(b), hi = b + 1 < FFT_N ? smoothed_bin(b + 1) : lo;
+        int32_t v = lo + (hi - lo) * frac / 256 - floor_q4;
         int32_t h = v * SPECTRUM_HEIGHT / SPECTRUM_RANGE;
         column_height[x] = h < 0 ? 0 : (h >= SPECTRUM_HEIGHT ? SPECTRUM_HEIGHT - 1 : h);
         int32_t c = v * WF_PALETTE / WATERFALL_RANGE;

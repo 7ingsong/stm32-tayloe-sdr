@@ -113,6 +113,7 @@ Every packet, in both directions:
 | `CMD_PTT` | `0x42` | On-board half-duplex radio. Payload `uint8`: `0` = receive (SSB demodulator on I2S, [src/ssb_rx.c](src/ssb_rx.c); DAC silent), `1` = transmit (mic on PA3 → SSB modulator → DAC, [src/ssb_tx.c](src/ssb_tx.c); I2S silent); empty = just read. Receive at boot. `RESP_ACK` with the state in effect |
 | `CMD_VOLUME` | `0x43` | On-board receiver volume. Payload `uint8` 0..255 (0 = mute, 8 ≈ −30 dBFS at full-scale input, each doubling +6 dB; 16 at boot), empty = just read. `RESP_ACK` with the volume |
 | `CMD_MIC_GAIN` | `0x44` | On-board transmitter mic gain. Payload `uint8` 0..255 (0 = silence, 16 ≈ full-scale mic → full-scale DAC, each doubling +6 dB; 16 at boot), empty = just read. `RESP_ACK` with the gain |
+| `CMD_SPECTRUM` | `0x45` | TFT spectrum smoothing. Payload `[rise_shift, fall_shift, smooth_bins]` (shifts 0..7: each frame a bin moves 1/2^n of the way to its new level, 0 = jump; smooth_bins 0/1 = average neighbouring bins 1-2-1), empty = just read. `RESP_ACK` with the values in effect |
 | `CMD_SET_FREQ` | `0x40` | Payload: LO in Hz as `uint32` LE (1.4–100 MHz), or empty to just read it. `RESP_ACK` with the LO in effect as `uint32` LE; out of range → `ERR_BAD_PAYLOAD` |
 
 Errors come back as `RESP_ERR` (`0x81`) with `[error_code, detail]` — see [inc/command.h](inc/command.h) for the codes.

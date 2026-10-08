@@ -197,6 +197,21 @@ static void handle_mic_gain(const frame_t* frame) {
     command_send(RESP_ACK, frame->command.seq, &g, sizeof(g));
 }
 
+// Empty payload: report; 3 bytes [rise_shift, fall_shift, smooth_bins]: set the TFT spectrum smoothing.
+// ACK carries the values in effect (clamped).
+static void handle_spectrum(const frame_t* frame) {
+    if (frame->command.len == 3) {
+        spectrum_smoothing_t s = {frame->payload[0], frame->payload[1], frame->payload[2]};
+        spectrum_set_smoothing(s);
+    } else if (frame->command.len != 0) {
+        command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
+        return;
+    }
+    spectrum_smoothing_t s = spectrum_get_smoothing();
+    uint8_t reply[] = {s.rise_shift, s.fall_shift, s.smooth_bins};
+    command_send(RESP_ACK, frame->command.seq, reply, sizeof(reply));
+}
+
 void command_handler(const frame_t* frame) {
     switch (frame->command.cmd) {
         case CMD_PING:
@@ -213,6 +228,9 @@ void command_handler(const frame_t* frame) {
             break;
         case CMD_MIC_GAIN:
             handle_mic_gain(frame);
+            break;
+        case CMD_SPECTRUM:
+            handle_spectrum(frame);
             break;
         case CMD_IQ_STREAM_TX:
             fifo_write(&fifo_dac, frame->payload, frame->command.len);
