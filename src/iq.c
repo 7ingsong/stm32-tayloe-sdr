@@ -10,6 +10,7 @@
 #include "ssb_rx.h"
 #include "mic.h"
 #include "ssb_tx.h"
+#include "spectrum.h"
 
 typedef struct __attribute__((packed)) {
     uint32_t overflow;
@@ -96,6 +97,7 @@ uint32_t iq_get_frequency(void) {
 }
 
 void on_adc(uint32_t *buf, int n){
+    spectrum_capture(buf, n);
     if (!ptt && tx_from_mic) { // half duplex: also idle while the host transmits (TX_START)
         ssb_rx_process_adc(buf, n);
     }
