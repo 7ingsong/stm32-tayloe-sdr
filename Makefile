@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= build
 
-compile: debug
+compile: release # debug (-O0) is several times slower: the radio DSP and the TFT fall behind
 
 release:
 	cmake -DCMAKE_BUILD_TYPE=Release -S . -B ${OUTPUT_DIR}
