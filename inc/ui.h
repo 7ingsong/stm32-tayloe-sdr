@@ -4,7 +4,7 @@
 /*
  * Front panel: 0.91" SSD1306 OLED (128x32, I2C1 shared with the Si5351) and the EC11 encoder.
  * Turn = tune the LO by the current step, short push = next step (10 Hz .. 1 MHz),
- * long push = toggle RX/TX (same as CMD_PTT).
+ * long push = toggle RX/TX (from duplex: back to RX; duplex itself is set with CMD_PTT).
  * Shows the frequency (step digit underlined) and RX/TX; host changes (CMD_SET_FREQ, CMD_PTT) show up too.
  */
 

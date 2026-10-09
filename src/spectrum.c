@@ -27,6 +27,25 @@ static spectrum_smoothing_t smoothing = {SPECTRUM_RISE_SHIFT, SPECTRUM_FALL_SHIF
 static int capture_count, fft_stage, stripe_y;
 static uint16_t wf_line = WF_TOP; // GRAM line currently shown at the top of the waterfall
 
+enum { BG_PLAIN, BG_DOTS, BG_GRID };
+static uint8_t background[3][W / 2];
+static uint8_t tallest;
+
+static uint8_t background_pixel(int type, int x) {
+    if (x == W / 2) return C3_RED;                                   // LO
+    if (type == BG_GRID && (x & 3) == 0) return C3_BLUE;             // horizontal grid line, dotted
+    if (type != BG_PLAIN && x % 40 == 0) return C3_BLUE;             // vertical grid, dotted
+    return C3_BLACK;
+}
+
+static void build_backgrounds(void) {
+    for (int type = 0; type < 3; type++) {
+        for (int x = 0; x < W; x += 2) {
+            background[type][x / 2] = (uint8_t)(background_pixel(type, x) << 3 | background_pixel(type, x + 1));
+        }
+    }
+}
+
 void spectrum_set_smoothing(spectrum_smoothing_t s) {
     smoothing.rise_shift = s.rise_shift > SPECTRUM_SHIFT_MAX ? SPECTRUM_SHIFT_MAX : s.rise_shift;
     smoothing.fall_shift = s.fall_shift > SPECTRUM_SHIFT_MAX ? SPECTRUM_SHIFT_MAX : s.fall_shift;
@@ -38,6 +57,7 @@ spectrum_smoothing_t spectrum_get_smoothing(void) {
 }
 
 void spectrum_init(void) {
+    build_backgrounds();
     ili9488_fill_rect(0, 0, ILI9488_WIDTH, ILI9488_HEIGHT, 0, 0, 0);
     // Vertical scroll: top SPECTRUM_HEIGHT lines fixed, the rest scrolls (VSCRDEF), starting at WF_TOP (VSCRSADD)
     uint8_t def[] = {0, WF_TOP, WF_ROWS >> 8, WF_ROWS & 0xFF, 0, 0};
@@ -112,6 +132,7 @@ static void compute_levels(void) {
     int32_t target = sum / FFT_N - FLOOR_BELOW; // most bins are noise: track it so no level setup is needed
     floor_q4 += (target - floor_q4) / 8;
 
+    tallest = 0;
     for (int x = 0; x < W; x++) {
         // Screen columns sit between bins (256 -> 320): interpolate instead of repeating a bin as a step
         int32_t pos = x * (FFT_N - 1) * 256 / (W - 1); // bin position, 8 fractional bits
@@ -120,6 +141,7 @@ static void compute_levels(void) {
         int32_t v = lo + (hi - lo) * frac / 256 - floor_q4;
         int32_t h = v * SPECTRUM_HEIGHT / SPECTRUM_RANGE;
         column_height[x] = h < 0 ? 0 : (h >= SPECTRUM_HEIGHT ? SPECTRUM_HEIGHT - 1 : h);
+        if (column_height[x] > tallest) tallest = column_height[x];
         int32_t c = v * WF_PALETTE / WATERFALL_RANGE;
         c = c < 0 ? 0 : (c >= WF_PALETTE ? WF_PALETTE - 1 : c);
         wf_row[3 * x] = wf_palette[3 * c];
@@ -128,18 +150,25 @@ static void compute_levels(void) {
     }
 }
 
-static uint8_t spectrum_pixel(int x, int y) {
-    if (column_height[x] >= SPECTRUM_HEIGHT - y) return C3_GREEN;
-    if (x == W / 2) return C3_RED;                         // LO
-    if ((y % 32 == 0 && (x & 3) == 0) || (x % 40 == 0 && (y & 3) == 0)) return C3_BLUE; // grid
-    return C3_BLACK;
-}
-
+/*
+ * Rendering cost matters (it competes with the radio DSP): instead of computing every pixel, each row starts
+ * from one of three precomputed backgrounds (plain, vertical-grid dots, horizontal grid line, all with the LO
+ * line) and only columns tall enough to reach the row get painted green. Rows above the tallest column are a copy.
+ */
 static void fill_stripe(int y0) {
     uint8_t *p = stripe;
-    for (int y = y0; y < y0 + STRIPE; y++) {
-        for (int x = 0; x < W; x += 2) {
-            *p++ = (uint8_t)(spectrum_pixel(x, y) << 3 | spectrum_pixel(x + 1, y));
+    for (int y = y0; y < y0 + STRIPE; y++, p += W / 2) {
+        const uint8_t *bg = background[(y & 31) == 0 ? BG_GRID : (y & 3) == 0 ? BG_DOTS : BG_PLAIN];
+        int threshold = SPECTRUM_HEIGHT - y; // a column reaches this row if its height is at least this
+        if (tallest < threshold) {
+            for (int i = 0; i < W / 2; i++) p[i] = bg[i];
+            continue;
+        }
+        for (int i = 0; i < W / 2; i++) {
+            uint8_t v = bg[i];
+            if (column_height[2 * i] >= threshold) v = (uint8_t)((v & 0x07) | C3_GREEN << 3);
+            if (column_height[2 * i + 1] >= threshold) v = (uint8_t)((v & 0x38) | C3_GREEN);
+            p[i] = v;
         }
     }
 }

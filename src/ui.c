@@ -74,7 +74,8 @@ static int render_piece(void) {
             ssd1306_DrawPixel(x + dx, 19, White);
         }
         ssd1306_SetCursor(0, 21);
-        ssd1306_WriteString(iq_get_ptt() ? "TX" : "RX", Font_7x10, White);
+        static const char *const mode_name[] = {"RX", "TX", "DX"};
+        ssd1306_WriteString(mode_name[iq_get_ptt()], Font_7x10, White);
     } else {
         ssd1306_SetCursor(4 * Font_7x10.FontWidth, 21);
         ssd1306_WriteString("STEP ", Font_7x10, White);
@@ -120,7 +121,7 @@ void ui_poll(void) {
         }
     }
     if (button_state && !long_press_fired && now - button_pressed_ms >= UI_LONG_PRESS_MS) {
-        iq_set_ptt(!iq_get_ptt());
+        iq_set_ptt(iq_get_ptt() == RADIO_RX ? RADIO_TX : RADIO_RX);
         long_press_fired = 1;
     }
 
@@ -151,8 +152,8 @@ void ui_poll(void) {
 
 #if UI_BLANK_ON_TX
     // See UI_BLANK_ON_TX in ui.h: the OLED row scan puts a hum comb into the mic, so blank it on TX
-    if (iq_get_ptt() == panel_on) {
-        panel_on = !iq_get_ptt();
+    if ((iq_get_ptt() != RADIO_RX) == panel_on) {
+        panel_on = iq_get_ptt() == RADIO_RX;
         ssd1306_SetPower(panel_on);
         shown_ptt = -1; // redraw when it comes back
     }
