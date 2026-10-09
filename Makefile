@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= build
 
-compile: debug
+compile: release
 
 release:
 	cmake -DCMAKE_BUILD_TYPE=Release -S . -B ${OUTPUT_DIR}
