@@ -8,11 +8,6 @@
  * Mirror of ssb_tx.c; tune with the LO (CMD_SET_FREQ): a USB station sits 300..2800 Hz above it.
  */
 
-// 0 = USB, 1 = LSB (which one is which also depends on the mixer's I/Q wiring)
-#ifndef SSB_RX_LSB
-#define SSB_RX_LSB 0
-#endif
-
 // Volume at boot (changeable with CMD_VOLUME): output = 16-bit audio sample * volume in the 24-bit I2S word.
 // 8 puts a full-scale signal at -30 dBFS; each doubling is +6 dB, 0 mutes.
 #ifndef SSB_RX_VOLUME_DEFAULT
@@ -26,6 +21,8 @@ int ssb_rx_poll(void); // demodulates the next small chunk; 0 = nothing queued
 
 // Fine tuning: offset_step = (dialled - LO) / 64 kHz * 2^32 (tune_t.nco_step), 0 = none
 void ssb_rx_set_offset(int32_t offset_step);
+
+void ssb_rx_set_lsb(uint8_t lsb); // 0 = USB, 1 = LSB (set by iq_set_sideband)
 
 void ssb_rx_set_volume(uint8_t volume);
 uint8_t ssb_rx_get_volume(void);

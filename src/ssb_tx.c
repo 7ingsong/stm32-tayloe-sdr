@@ -15,6 +15,11 @@ static fir_hist_t d_q = {d_hist_q, D_TAPS, 0};
 static int a_count, b_count;
 
 static uint8_t gain = SSB_TX_GAIN_DEFAULT;
+static uint8_t lsb;
+
+void ssb_tx_set_lsb(uint8_t on) {
+    lsb = on ? 1 : 0;
+}
 
 // Digital fine tuning (tune.c): shift the baseband up by the offset between the LO and the dialled frequency
 static uint32_t nco_phase;
@@ -50,9 +55,7 @@ void ssb_tx_process(const uint16_t *mic, int n, uint32_t *dac) {
         const int16_t *xc = fir_push(&c, sat16(fir_dot(taps_b, xb, B_TAPS) >> 15)); // 8 kHz audio
         int16_t si = sat16(fir_dot(taps_c_re, xc, C_TAPS) >> 14);              // analytic signal, USB
         int16_t sq = sat16(fir_dot(taps_c_im, xc, C_TAPS) >> 14);
-#if SSB_TX_LSB
-        sq = -sq;
-#endif
+        if (lsb) sq = sat16(-sq); // LSB: conjugate
         const int16_t *xi = fir_push(&d_i, si);
         const int16_t *xq = fir_push(&d_q, sq);
 

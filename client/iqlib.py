@@ -22,6 +22,7 @@ CMD_PTT = 0x42
 CMD_VOLUME = 0x43
 CMD_MIC_GAIN = 0x44
 CMD_SPECTRUM = 0x45
+CMD_SIDEBAND = 0x46
 
 RESP_ACK = 0x80
 RESP_ERR = 0x81
@@ -277,6 +278,14 @@ class DeviceClient:
         """On-board transmitter mic gain 0..255 (0 = silence, each doubling +6 dB), None = just read. Returns the gain."""
         payload = b"" if gain is None else bytes([int(gain)])
         return self.req_command(CMD_MIC_GAIN, cmd_resp=RESP_ACK, payload=payload)[0]
+
+    SIDEBAND_USB = 0
+    SIDEBAND_LSB = 1
+
+    def set_sideband(self, sideband=None):
+        """On-board SSB sideband: SIDEBAND_USB or SIDEBAND_LSB; None only reports. Returns the sideband in effect."""
+        payload = bytes() if sideband is None else bytes([int(sideband)])
+        return self.req_command(CMD_SIDEBAND, cmd_resp=RESP_ACK, payload=payload)[0]
 
     def set_spectrum(self, rise=None, fall=None, smooth=None, dc=None):
         """TFT spectrum smoothing. rise/fall: 0..7 (each frame a bin moves 1/2^n of the way; 0 = jump, higher =

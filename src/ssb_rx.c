@@ -36,6 +36,11 @@ static uint32_t phase;    // 0..RATE_IN_DIV-1, fractional input position
 static int playing;
 
 static uint8_t volume = SSB_RX_VOLUME_DEFAULT;
+static uint8_t lsb;
+
+void ssb_rx_set_lsb(uint8_t on) {
+    lsb = on ? 1 : 0;
+}
 
 void ssb_rx_set_volume(uint8_t v) {
     volume = v;
@@ -87,11 +92,7 @@ static void demodulate(const uint32_t *buf, int n) {
         // Real part of the complex band-pass: Re{(hr + j*hi)(I + j*Q)} = hr*I - hi*Q; LSB uses conjugate taps
         int32_t re = fir_dot(taps_c_re, xci, C_TAPS);
         int32_t im = fir_dot(taps_c_im, xcq, C_TAPS);
-#if SSB_RX_LSB
-        int32_t audio = (re + im) >> 14;
-#else
-        int32_t audio = (re - im) >> 14;
-#endif
+        int32_t audio = (lsb ? re + im : re - im) >> 14; // LSB: conjugate taps
         ring[ring_w++ & RING_MASK] = sat16(audio);
     }
 }

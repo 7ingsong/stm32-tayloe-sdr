@@ -22,6 +22,8 @@ static uint32_t last_retune_ms;
 static int button_raw, button_state;
 static uint32_t button_changed_ms, button_pressed_ms;
 static int long_press_fired;
+static int click_pending;          // a short press was released, waiting to see whether a second one follows
+static uint32_t click_released_ms;
 
 static int display_ok, sending;
 #if UI_BLANK_ON_TX
@@ -30,7 +32,7 @@ static int panel_on = 1;
 static int render_step = -1; // >= 0 while a frame is being drawn piecewise
 static char freq_text[12];
 static uint32_t shown_freq;
-static int shown_step = -1, shown_ptt = -1;
+static int shown_step = -1, shown_ptt = -1, shown_sideband = -1;
 
 // "dd.ddd.ddd", leading zeros of the MHz part blanked; 11 chars for 100 MHz
 static void format_frequency(uint32_t f, char *s) {
@@ -76,9 +78,10 @@ static int render_piece(void) {
         ssd1306_SetCursor(0, 21);
         static const char *const mode_name[] = {"RX", "TX", "DX"};
         ssd1306_WriteString(mode_name[iq_get_ptt()], Font_7x10, White);
+        ssd1306_SetCursor(3 * Font_7x10.FontWidth, 21);
+        ssd1306_WriteString(iq_get_sideband() == SIDEBAND_LSB ? "LSB" : "USB", Font_7x10, White);
     } else {
-        ssd1306_SetCursor(4 * Font_7x10.FontWidth, 21);
-        ssd1306_WriteString("STEP ", Font_7x10, White);
+        ssd1306_SetCursor(7 * Font_7x10.FontWidth, 21);
         ssd1306_WriteString(step_name[step], Font_7x10, White);
         return 1;
     }
@@ -108,13 +111,15 @@ void ui_init(void) {
         shown_freq = freq;
         shown_step = step;
         shown_ptt = iq_get_ptt();
+        shown_sideband = iq_get_sideband();
     }
 }
 
 void ui_poll(void) {
     uint32_t now = get_ticks_ms();
 
-    // Push (debounced): short = next tuning step on release, long = toggle RX/TX as soon as it's held long enough
+    // Push (debounced): short = next tuning step (once no second press follows), double = USB/LSB,
+    // long = toggle RX/TX as soon as it's held long enough
     int down = EC11_ButtonDown();
     if (down != button_raw) {
         button_raw = down;
@@ -125,12 +130,23 @@ void ui_poll(void) {
             button_pressed_ms = now;
             long_press_fired = 0;
         } else if (!long_press_fired) {
-            step = (step + 1) % N_STEPS;
+            if (click_pending && now - click_released_ms < UI_DOUBLE_PRESS_MS) {
+                click_pending = 0;
+                iq_set_sideband(iq_get_sideband() == SIDEBAND_LSB ? SIDEBAND_USB : SIDEBAND_LSB);
+            } else {
+                click_pending = 1;
+                click_released_ms = now;
+            }
         }
+    }
+    if (click_pending && !button_state && now - click_released_ms >= UI_DOUBLE_PRESS_MS) {
+        click_pending = 0;
+        step = (step + 1) % N_STEPS;
     }
     if (button_state && !long_press_fired && now - button_pressed_ms >= UI_LONG_PRESS_MS) {
         iq_set_ptt(iq_get_ptt() == RADIO_RX ? RADIO_TX : RADIO_RX);
         long_press_fired = 1;
+        click_pending = 0; // a short press just before belongs to this, not a step change
     }
 
     // Turn: tune
@@ -178,10 +194,12 @@ void ui_poll(void) {
             ssd1306_StartUpdate();
             sending = 1;
         }
-    } else if (freq != shown_freq || step != shown_step || iq_get_ptt() != shown_ptt) {
+    } else if (freq != shown_freq || step != shown_step || iq_get_ptt() != shown_ptt ||
+               iq_get_sideband() != shown_sideband) {
         shown_freq = freq;
         shown_step = step;
         shown_ptt = iq_get_ptt();
+        shown_sideband = iq_get_sideband();
         render_step = 0;
     }
 }

@@ -67,9 +67,9 @@ typedef struct {
     uint8_t color;
 } label_t;
 
-static label_t labels[3];
+static label_t labels[4];
 static uint32_t shown_freq = 0xFFFFFFFF;
-static uint8_t shown_mode = 0xFF;
+static uint8_t shown_mode = 0xFF, shown_sideband = 0xFF;
 static const char *shown_step;
 
 // "dd.ddd.ddd", leading zero of the MHz part blanked; 11 chars at 100 MHz
@@ -91,7 +91,8 @@ static void format_frequency(uint32_t f, char *s) {
 }
 
 static int header_changed(void) {
-    return ui_get_frequency() != shown_freq || iq_get_ptt() != shown_mode || ui_get_step_name() != shown_step;
+    return ui_get_frequency() != shown_freq || iq_get_ptt() != shown_mode || ui_get_step_name() != shown_step ||
+           iq_get_sideband() != shown_sideband;
 }
 
 static void build_header(void) {
@@ -108,7 +109,11 @@ static void build_header(void) {
     int i = 0;
     for (const char *p = shown_step; *p && i < 11; p++) labels[2].text[i++] = *p;
     labels[2].text[i] = 0;
-    labels[2].font = &Font_7x10;  labels[2].x = 236; labels[2].y = 11; labels[2].color = C3_CYAN;
+    labels[2].font = &Font_7x10;  labels[2].x = 236; labels[2].y = 18; labels[2].color = C3_CYAN;
+    shown_sideband = iq_get_sideband();
+    labels[3].text[0] = shown_sideband == SIDEBAND_LSB ? 'L' : 'U'; labels[3].text[1] = 'S'; labels[3].text[2] = 'B';
+    labels[3].text[3] = 0;
+    labels[3].font = &Font_7x10;  labels[3].x = 236; labels[3].y = 4;  labels[3].color = C3_WHITE;
 }
 
 static void put_pixel(uint8_t *row, int x, uint8_t color) {
@@ -138,7 +143,7 @@ static void fill_header_stripe(int y0) {
     for (int y = y0; y < y0 + STRIPE; y++, row += W / 2) {
         uint8_t bg = y == HEADER - 1 ? (C3_BLUE << 3 | C3_BLUE) : 0; // thin line under the header
         for (int i = 0; i < W / 2; i++) row[i] = bg;
-        draw_labels(row, y, labels, 3);
+        draw_labels(row, y, labels, 4);
     }
 }
 static uint16_t wf_line = WF_TOP; // GRAM line currently shown at the top of the waterfall

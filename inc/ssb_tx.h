@@ -8,11 +8,6 @@
  * (only positive frequencies survive = USB), interpolate back to 64 kHz.
  */
 
-// 0 = USB, 1 = LSB (which one appears on air also depends on the exciter's I/Q wiring)
-#ifndef SSB_TX_LSB
-#define SSB_TX_LSB 0
-#endif
-
 // Mic gain at boot (changeable with CMD_MIC_GAIN): DAC code = I or Q * gain / 128 around mid-scale.
 // A real tone keeps half its amplitude in each of I and Q after the band-pass, so 16 maps a full-scale
 // mic signal back to roughly full scale. Each doubling is +6 dB, 0 transmits silence.
@@ -25,6 +20,8 @@ void ssb_tx_process(const uint16_t *mic, int n, uint32_t *dac);
 
 // Fine tuning: offset_step = (dialled - LO) / 64 kHz * 2^32 (tune_t.nco_step), 0 = none
 void ssb_tx_set_offset(int32_t offset_step);
+
+void ssb_tx_set_lsb(uint8_t lsb); // 0 = USB, 1 = LSB (set by iq_set_sideband)
 
 void ssb_tx_set_gain(uint8_t gain);
 uint8_t ssb_tx_get_gain(void);

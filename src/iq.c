@@ -125,9 +125,11 @@ int iq_tx_poll(void) {
     return 0;
 }
 
+static uint8_t sideband = SSB_SIDEBAND_DEFAULT;
+
 // SSB audio band around the dialled frequency, for both on-board chains (tune_choose keeps it off 0 Hz)
-#define PASSBAND_LO ((SSB_RX_LSB || SSB_TX_LSB) ? -2800 : 300)
-#define PASSBAND_HI ((SSB_RX_LSB && SSB_TX_LSB) ? -300 : 2800)
+#define PASSBAND_LO (sideband == SIDEBAND_LSB ? -2800 : 300)
+#define PASSBAND_HI (sideband == SIDEBAND_LSB ? -300 : 2800)
 
 /*
  * On-board radio: the LO goes on a spur-free point near the dialled frequency and the rest is shifted by the
@@ -164,6 +166,17 @@ void iq_set_frequency(uint32_t frequency) {
     retune();
 }
 
+uint8_t iq_get_sideband(void) {
+    return sideband;
+}
+
+void iq_set_sideband(uint8_t sb) {
+    sideband = sb == SIDEBAND_LSB ? SIDEBAND_LSB : SIDEBAND_USB;
+    ssb_rx_set_lsb(sideband == SIDEBAND_LSB);
+    ssb_tx_set_lsb(sideband == SIDEBAND_LSB);
+    retune(); // the LO goes to the other side of the dialled frequency
+}
+
 uint32_t iq_get_frequency(void) {
     return lo_frequency;
 }
@@ -198,6 +211,8 @@ void on_dac(uint32_t *buf, int n) {
 
 
 void iq_init() {
+    ssb_rx_set_lsb(sideband == SIDEBAND_LSB);
+    ssb_tx_set_lsb(sideband == SIDEBAND_LSB);
 
     fifo_init(&fifo_dac, (uint8_t*)fifo_buffer_dac, sizeof(fifo_buffer_dac));
     fifo_init(&fifo_adc, (uint8_t*)fifo_buffer_adc, sizeof(fifo_buffer_adc));
@@ -285,6 +300,17 @@ static void handle_spectrum(const frame_t* frame) {
     command_send(RESP_ACK, frame->command.seq, reply, sizeof(reply));
 }
 
+// Empty payload: report; 1 byte: 0 = USB, 1 = LSB. ACK carries the sideband in effect.
+static void handle_sideband(const frame_t* frame) {
+    if (frame->command.len == 1) {
+        iq_set_sideband(frame->payload[0]);
+    } else if (frame->command.len != 0) {
+        command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
+        return;
+    }
+    command_send(RESP_ACK, frame->command.seq, &sideband, sizeof(sideband));
+}
+
 void command_handler(const frame_t* frame) {
     switch (frame->command.cmd) {
         case CMD_PING:
@@ -304,6 +330,9 @@ void command_handler(const frame_t* frame) {
             break;
         case CMD_SPECTRUM:
             handle_spectrum(frame);
+            break;
+        case CMD_SIDEBAND:
+            handle_sideband(frame);
             break;
         case CMD_IQ_STREAM_TX:
             fifo_write(&fifo_dac, frame->payload, frame->command.len);

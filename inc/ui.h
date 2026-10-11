@@ -22,6 +22,11 @@
 #endif
 
 // Hold the encoder button this long to toggle RX/TX; it fires while still held
+// Second press within this time after a release = double press (USB/LSB); a single press acts only after it
+#ifndef UI_DOUBLE_PRESS_MS
+#define UI_DOUBLE_PRESS_MS 300
+#endif
+
 #ifndef UI_LONG_PRESS_MS
 #define UI_LONG_PRESS_MS 700
 #endif
