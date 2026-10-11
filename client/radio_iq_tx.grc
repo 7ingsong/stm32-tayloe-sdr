@@ -183,7 +183,7 @@ blocks:
     affinity: ''
     alias: ''
     comment: ''
-    file: /Users/singsong/Downloads/0012163_We_Will_Rock_You_[full_mix(demo)].wav
+    file: /Users/singsong/projects/public/stm32-sdr/client/We_Will_Rock_You.wav
     maxoutbuf: '0'
     minoutbuf: '0'
     nchan: '1'
