@@ -11,6 +11,7 @@
 #include "mic.h"
 #include "ssb_tx.h"
 #include "spectrum.h"
+#include "tune.h"
 
 typedef struct __attribute__((packed)) {
     uint32_t overflow;
@@ -57,8 +58,14 @@ uint8_t iq_get_ptt(void) {
     return ptt;
 }
 
+static void retune(void);
+
 void iq_set_ptt(uint8_t mode) {
-    ptt = mode > RADIO_DUPLEX ? RADIO_DUPLEX : mode;
+    mode = mode > RADIO_DUPLEX ? RADIO_DUPLEX : mode;
+    if (mode != ptt) {
+        ptt = mode;
+        retune(); // duplex tunes the LO exactly, see retune()
+    }
 }
 
 #define RX_FRAMES_PER_PASS 4 // ~0.25 ms of checksums and copies
@@ -110,15 +117,64 @@ void on_mic(uint16_t *buf, int n) {
     mic_queued = n;
 }
 
-void iq_tx_poll(void) {
+int iq_tx_poll(void) {
     if (mic_queued > 0 && tx_from_mic) {
         tx_chunk();
+        return 1;
     }
+    return 0;
+}
+
+static uint8_t sideband = SSB_SIDEBAND_DEFAULT;
+
+// SSB audio band around the dialled frequency, for both on-board chains (tune_choose keeps it off 0 Hz)
+#define PASSBAND_LO (sideband == SIDEBAND_LSB ? -2800 : 300)
+#define PASSBAND_HI (sideband == SIDEBAND_LSB ? -300 : 2800)
+
+/*
+ * On-board radio: the LO goes on a spur-free point near the dialled frequency and the rest is shifted by the
+ * NCO in ssb_rx / ssb_tx (see tune.h). While the host streams I/Q it expects the dialled frequency at 0 Hz,
+ * so then (or when no spur-free point is near) the LO is tuned exactly as before. Duplex too: RX + TX already
+ * take ~90% of the CPU, and the two NCOs at 64 kHz make the I2S refill late. And transmit: the 64 kHz DAC has
+ * an image at f - 64 kHz that only its sinc response weakens, ~27 dB at offset 0 but only ~3 dB with the band
+ * shifted +26 kHz, so the transmitter keeps the LO on the dialled frequency (the receiver is muted then anyway).
+ */
+volatile uint8_t tune_debug_exact; // debugger: 1 = always tune the LO exactly (no NCO), for comparisons
+
+static void retune(void) {
+    static tune_t applied; // the grid LO now in the Si5351 (div 0: none, the LO was tuned exactly)
+    tune_t t;
+    if (!tune_debug_exact && !rx_streaming && tx_from_mic && ptt == RADIO_RX && tune_choose(lo_frequency, PASSBAND_LO, PASSBAND_HI, &t)) {
+        // Steps within the same 8 kHz grid cell only move the NCO: don't rewrite (and reset) the PLL for them
+        if (t.n != applied.n || t.q != applied.q || t.div != applied.div) {
+            si5351_set_lo_rational(t.n, t.q, t.div, SI5351_DRIVE_STRENGTH_2MA);
+            applied = t;
+        }
+    } else {
+        si5351_set_frequency((int32_t)lo_frequency, SI5351_DRIVE_STRENGTH_2MA);
+        applied.div = 0;
+        t.offset_hz = 0;
+        t.nco_step = 0;
+    }
+    ssb_rx_set_offset(t.nco_step);
+    ssb_tx_set_offset(t.nco_step);
+    spectrum_set_offset(t.offset_hz);
 }
 
 void iq_set_frequency(uint32_t frequency) {
     lo_frequency = frequency;
-    si5351_set_frequency((int32_t)frequency, SI5351_DRIVE_STRENGTH_2MA);
+    retune();
+}
+
+uint8_t iq_get_sideband(void) {
+    return sideband;
+}
+
+void iq_set_sideband(uint8_t sb) {
+    sideband = sb == SIDEBAND_LSB ? SIDEBAND_LSB : SIDEBAND_USB;
+    ssb_rx_set_lsb(sideband == SIDEBAND_LSB);
+    ssb_tx_set_lsb(sideband == SIDEBAND_LSB);
+    retune(); // the LO goes to the other side of the dialled frequency
 }
 
 uint32_t iq_get_frequency(void) {
@@ -155,6 +211,8 @@ void on_dac(uint32_t *buf, int n) {
 
 
 void iq_init() {
+    ssb_rx_set_lsb(sideband == SIDEBAND_LSB);
+    ssb_tx_set_lsb(sideband == SIDEBAND_LSB);
 
     fifo_init(&fifo_dac, (uint8_t*)fifo_buffer_dac, sizeof(fifo_buffer_dac));
     fifo_init(&fifo_adc, (uint8_t*)fifo_buffer_adc, sizeof(fifo_buffer_adc));
@@ -226,19 +284,31 @@ static void handle_mic_gain(const frame_t* frame) {
     command_send(RESP_ACK, frame->command.seq, &g, sizeof(g));
 }
 
-// Empty payload: report; 3 bytes [rise_shift, fall_shift, smooth_bins]: set the TFT spectrum smoothing.
-// ACK carries the values in effect (clamped).
+// Empty payload: report; 3 bytes [rise_shift, fall_shift, smooth_bins] (+ optional [dc_remove]): set the TFT
+// spectrum smoothing (and DC hiding). ACK carries the 4 values in effect (clamped).
 static void handle_spectrum(const frame_t* frame) {
-    if (frame->command.len == 3) {
-        spectrum_smoothing_t s = {frame->payload[0], frame->payload[1], frame->payload[2]};
+    if (frame->command.len == 3 || frame->command.len == 4) {
+        spectrum_smoothing_t s = {frame->payload[0], frame->payload[1], frame->payload[2],
+                                  frame->command.len == 4 ? frame->payload[3] : spectrum_get_smoothing().dc_remove};
         spectrum_set_smoothing(s);
     } else if (frame->command.len != 0) {
         command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
         return;
     }
     spectrum_smoothing_t s = spectrum_get_smoothing();
-    uint8_t reply[] = {s.rise_shift, s.fall_shift, s.smooth_bins};
+    uint8_t reply[] = {s.rise_shift, s.fall_shift, s.smooth_bins, s.dc_remove};
     command_send(RESP_ACK, frame->command.seq, reply, sizeof(reply));
+}
+
+// Empty payload: report; 1 byte: 0 = USB, 1 = LSB. ACK carries the sideband in effect.
+static void handle_sideband(const frame_t* frame) {
+    if (frame->command.len == 1) {
+        iq_set_sideband(frame->payload[0]);
+    } else if (frame->command.len != 0) {
+        command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
+        return;
+    }
+    command_send(RESP_ACK, frame->command.seq, &sideband, sizeof(sideband));
 }
 
 void command_handler(const frame_t* frame) {
@@ -261,6 +331,9 @@ void command_handler(const frame_t* frame) {
         case CMD_SPECTRUM:
             handle_spectrum(frame);
             break;
+        case CMD_SIDEBAND:
+            handle_sideband(frame);
+            break;
         case CMD_IQ_STREAM_TX:
             fifo_write(&fifo_dac, frame->payload, frame->command.len);
             break;
@@ -269,21 +342,25 @@ void command_handler(const frame_t* frame) {
             tx_from_mic = 0;
             mic_queued = 0;
             dac_restart_fifo(0); // the host fills it from here
+            retune();
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
         case CMD_IQ_STREAM_TX_STOP:
             tx_from_mic = 1;
             dac_restart_fifo(DAC_PRIME_BLOCKS);
+            retune();
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
 
         case CMD_IQ_STREAM_RX_START:
             fifo_adc.tail = fifo_adc.head; // start from fresh samples
             rx_streaming = 1;
+            retune();
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
         case CMD_IQ_STREAM_RX_STOP:
             rx_streaming = 0;
+            retune();
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
 

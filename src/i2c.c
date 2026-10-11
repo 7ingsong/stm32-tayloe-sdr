@@ -15,7 +15,9 @@ void I2C1_GPIO_Config(void) {
 
     // Configure PB6 (I2C1_SCL) and PB7 (I2C1_SDA) as Alternate Function Open-Drain
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_7;
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    // Slowest edges (400 kHz needs nothing faster): each Si5351 retune and OLED redraw is a burst of I2C traffic,
+    // and with 50 MHz edges its harmonics showed up in the receiver as a comb whenever the LO was retuned
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_2MHz;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_OD;
     
     GPIO_Init(GPIOB, &GPIO_InitStructure);

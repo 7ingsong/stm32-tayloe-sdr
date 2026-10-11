@@ -27,6 +27,7 @@ enum {
     CMD_VOLUME = 0x43,
     CMD_MIC_GAIN = 0x44,
     CMD_SPECTRUM = 0x45,
+    CMD_SIDEBAND = 0x46,
 };
 
 enum {

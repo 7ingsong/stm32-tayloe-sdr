@@ -16,6 +16,15 @@ uint32_t iq_get_frequency(void);
 enum { RADIO_RX = 0, RADIO_TX = 1, RADIO_DUPLEX = 2 };
 uint8_t iq_get_ptt(void);
 void iq_set_ptt(uint8_t mode); // larger values are clamped to RADIO_DUPLEX
-void iq_tx_poll(void);         // modulates the next small chunk of the queued mic block; call often
+int iq_tx_poll(void);          // modulates the next small chunk of the queued mic block; 0 = nothing queued
+
+// Sideband of the on-board receiver and transmitter (CMD_SIDEBAND): USB = audio 300..2800 Hz above the dialled
+// frequency, LSB = below. (Which is which on air also depends on the mixer's I/Q wiring.)
+enum { SIDEBAND_USB = 0, SIDEBAND_LSB = 1 };
+#ifndef SSB_SIDEBAND_DEFAULT
+#define SSB_SIDEBAND_DEFAULT SIDEBAND_USB
+#endif
+uint8_t iq_get_sideband(void);
+void iq_set_sideband(uint8_t sideband); // anything but SIDEBAND_LSB is USB
 
 #endif

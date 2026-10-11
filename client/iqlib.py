@@ -22,6 +22,7 @@ CMD_PTT = 0x42
 CMD_VOLUME = 0x43
 CMD_MIC_GAIN = 0x44
 CMD_SPECTRUM = 0x45
+CMD_SIDEBAND = 0x46
 
 RESP_ACK = 0x80
 RESP_ERR = 0x81
@@ -278,18 +279,27 @@ class DeviceClient:
         payload = b"" if gain is None else bytes([int(gain)])
         return self.req_command(CMD_MIC_GAIN, cmd_resp=RESP_ACK, payload=payload)[0]
 
-    def set_spectrum(self, rise=None, fall=None, smooth=None):
+    SIDEBAND_USB = 0
+    SIDEBAND_LSB = 1
+
+    def set_sideband(self, sideband=None):
+        """On-board SSB sideband: SIDEBAND_USB or SIDEBAND_LSB; None only reports. Returns the sideband in effect."""
+        payload = bytes() if sideband is None else bytes([int(sideband)])
+        return self.req_command(CMD_SIDEBAND, cmd_resp=RESP_ACK, payload=payload)[0]
+
+    def set_spectrum(self, rise=None, fall=None, smooth=None, dc=None):
         """TFT spectrum smoothing. rise/fall: 0..7 (each frame a bin moves 1/2^n of the way; 0 = jump, higher =
-        calmer), smooth: average neighbouring bins (bool). Arguments left as None keep the current value.
-        Returns (rise, fall, smooth) in effect."""
+        calmer), smooth: average neighbouring bins (bool), dc: hide the DC spike at the LO (bool).
+        Arguments left as None keep the current value. Returns (rise, fall, smooth, dc) in effect."""
         cur = self.req_command(CMD_SPECTRUM, cmd_resp=RESP_ACK)
-        if rise is None and fall is None and smooth is None:
-            return cur[0], cur[1], bool(cur[2])
+        if rise is None and fall is None and smooth is None and dc is None:
+            return cur[0], cur[1], bool(cur[2]), bool(cur[3])
         new = bytes([cur[0] if rise is None else int(rise),
                      cur[1] if fall is None else int(fall),
-                     cur[2] if smooth is None else (1 if smooth else 0)])
+                     cur[2] if smooth is None else (1 if smooth else 0),
+                     cur[3] if dc is None else (1 if dc else 0)])
         resp = self.req_command(CMD_SPECTRUM, cmd_resp=RESP_ACK, payload=new)
-        return resp[0], resp[1], bool(resp[2])
+        return resp[0], resp[1], bool(resp[2]), bool(resp[3])
 
     def cmd_iq_stream_tx_info(self, payload=bytes()):
         resp = self.req_command(CMD_IQ_STREAM_TX_INFO, cmd_resp=RESP_IQ_STREAM_TX_INFO, payload=payload)

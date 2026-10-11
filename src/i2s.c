@@ -59,7 +59,8 @@ void i2s_init() {
     GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE);
 
     GPIO_InitTypeDef GPIO_InitStructure;
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    // 10 MHz edges are plenty for the ~3 MHz BCLK; 50 MHz edges only add harmonics the receiver picks up
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_10MHz;
 
     // WS
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_15;

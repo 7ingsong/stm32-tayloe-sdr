@@ -9,11 +9,16 @@
 #include "ili9488.h"
 #include "spectrum.h"
 
-// The I2S half-buffer is only 2.6 ms: refill it (and run the next RX/TX DSP chunk) between every other step
+// The I2S half-buffer is only 2.6 ms: refill it between every other step, and between the RX/TX DSP chunks.
+// Queued RX/TX blocks are worked off completely here: with one chunk per call a busy loop could fall behind,
+// and a block left over when the next one arrives is then finished in one blocking go (~3 ms, I2S late).
 static void audio_service(void) {
-    i2s_dispatch();
-    ssb_rx_poll();
-    iq_tx_poll();
+    int busy;
+    do {
+        i2s_dispatch();
+        busy = ssb_rx_poll();
+        busy |= iq_tx_poll();
+    } while (busy);
 }
 
 int main() {
