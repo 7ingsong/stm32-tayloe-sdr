@@ -30,12 +30,19 @@
 #define SPECTRUM_SMOOTH_BINS 1
 #endif
 
+// 1 = hide the DC spike: it marks the LO (ADC offset, LO leakage), not a signal, and with the digital fine tuning
+// (tune.h) the LO sits off the dialled frequency and moves between grid points, so the spike wanders and jumps
+#ifndef SPECTRUM_DC_REMOVE
+#define SPECTRUM_DC_REMOVE 1
+#endif
+
 #define SPECTRUM_SHIFT_MAX 7
 
 typedef struct {
     uint8_t rise_shift;   // 0..SPECTRUM_SHIFT_MAX
     uint8_t fall_shift;   // 0..SPECTRUM_SHIFT_MAX
     uint8_t smooth_bins;  // 0 or 1
+    uint8_t dc_remove;    // 0 or 1, SPECTRUM_DC_REMOVE
 } spectrum_smoothing_t;
 
 void spectrum_set_smoothing(spectrum_smoothing_t s); // out-of-range values are clamped

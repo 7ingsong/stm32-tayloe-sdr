@@ -14,7 +14,9 @@
 
 // Levels are log2(power) in 1/16 steps (q4): 1 dB = 16 / 3.0103 = 5.3 q4
 #define DB_Q4(db)       ((db) * 16 * 100 / 301)
-#define SPECTRUM_RANGE  DB_Q4(70)  // dB from the bottom to the top of the spectrum
+#define SPECTRUM_DB     80         // dB from the bottom to the top of the spectrum: 8 grid steps of 10 dB
+#define SPECTRUM_RANGE  DB_Q4(SPECTRUM_DB)
+#define ROWS_PER_10DB   (SPEC_ROWS * 10 / SPECTRUM_DB) // 16
 #define WATERFALL_RANGE DB_Q4(40)  // dB from black to white in the waterfall
 #define FLOOR_BELOW     DB_Q4(10)  // the bottom edge sits this far below the average bin (noise floor)
 
@@ -27,14 +29,23 @@ static uint8_t stripe[STRIPE * W / 2]; // RGB111: 2 pixels per byte
 static uint8_t wf_row[W * 3];          // RGB666
 static int32_t floor_q4 = DB_Q4(80);
 
-static spectrum_smoothing_t smoothing = {SPECTRUM_RISE_SHIFT, SPECTRUM_FALL_SHIFT, SPECTRUM_SMOOTH_BINS};
+static spectrum_smoothing_t smoothing = {SPECTRUM_RISE_SHIFT, SPECTRUM_FALL_SHIFT, SPECTRUM_SMOOTH_BINS, SPECTRUM_DC_REMOVE};
 
 static int capture_count, fft_stage, stripe_y;
-static int marker_x = W / 2; // red line: the dialled frequency, LO + digital offset
+static const int marker_x = W / 2; // red line: the dialled frequency, always in the middle
+
+/*
+ * The display is centred on the dialled frequency, not on the LO: the FFT bins are read shifted by the digital
+ * offset (tune.h), so the picture scrolls smoothly while tuning and the red line stays put; the DC that marks
+ * the LO is taken out (spectrum_capture). It shows +-24 kHz (150 Hz per pixel, dotted grid every 6 kHz): the LO
+ * is at most 8 kHz below the dialled frequency, so that span always lies within the +-32 kHz around it.
+ */
+#define SPAN_HZ 48000
+#define BIN_HZ  (64000 / FFT_N)
+static volatile int32_t offset_hz_now;
 
 void spectrum_set_offset(int32_t offset_hz) {
-    int x = W / 2 + (int)((int64_t)offset_hz * W / 64000);
-    marker_x = x < 0 ? 0 : (x >= W ? W - 1 : x);
+    offset_hz_now = offset_hz;
 }
 
 // Red marker into a 3-bit row, unless a spectrum bar already covers that pixel
@@ -106,23 +117,28 @@ static void put_pixel(uint8_t *row, int x, uint8_t color) {
     *b = (x & 1) ? (uint8_t)((*b & 0x38) | color) : (uint8_t)((*b & 0x07) | color << 3);
 }
 
+// Row y (in the labels' coordinates) of every label that crosses it, into a 3-bit row
+static void draw_labels(uint8_t *row, int y, const label_t *lbs, int n) {
+    for (int l = 0; l < n; l++) {
+        const label_t *lb = &lbs[l];
+        int fy = y - lb->y;
+        if (fy < 0 || fy >= lb->font->FontHeight) continue;
+        int x = lb->x;
+        for (const char *c = lb->text; *c; c++, x += lb->font->FontWidth) {
+            uint16_t bits = lb->font->data[(*c - 32) * lb->font->FontHeight + fy];
+            for (int fx = 0; bits && fx < lb->font->FontWidth; fx++, bits <<= 1) {
+                if (bits & 0x8000) put_pixel(row, x + fx, lb->color);
+            }
+        }
+    }
+}
+
 static void fill_header_stripe(int y0) {
     uint8_t *row = stripe;
     for (int y = y0; y < y0 + STRIPE; y++, row += W / 2) {
         uint8_t bg = y == HEADER - 1 ? (C3_BLUE << 3 | C3_BLUE) : 0; // thin line under the header
         for (int i = 0; i < W / 2; i++) row[i] = bg;
-        for (int l = 0; l < 3; l++) {
-            const label_t *lb = &labels[l];
-            int fy = y - lb->y;
-            if (fy < 0 || fy >= lb->font->FontHeight) continue;
-            int x = lb->x;
-            for (const char *c = lb->text; *c; c++, x += lb->font->FontWidth) {
-                uint16_t bits = lb->font->data[(*c - 32) * lb->font->FontHeight + fy];
-                for (int fx = 0; bits && fx < lb->font->FontWidth; fx++, bits <<= 1) {
-                    if (bits & 0x8000) put_pixel(row, x + fx, lb->color);
-                }
-            }
-        }
+        draw_labels(row, y, labels, 3);
     }
 }
 static uint16_t wf_line = WF_TOP; // GRAM line currently shown at the top of the waterfall
@@ -131,9 +147,25 @@ enum { BG_PLAIN, BG_DOTS, BG_GRID };
 static uint8_t background[3][W / 2];
 static uint8_t tallest;
 
+/*
+ * Scale: dotted vertical lines on round frequencies (every 5 kHz, labelled every 10 kHz along the top), so they
+ * scroll with the signals; dotted horizontal lines every 10 dB, labelled in dBFS on the left (0 dBFS: a complex
+ * tone at the ADC's full scale). The bottom edge follows the noise floor in 10 dB steps, so the labels stay round.
+ */
+#define GRID_HZ     5000
+#define N_FLABELS   6
+#define N_DBLABELS  (SPECTRUM_DB / 10 - 1)
+static uint8_t vline[W / 8];             // bitmap: a vertical grid line in this column
+static label_t scale_labels[N_FLABELS + N_DBLABELS];
+static int n_scale_labels;
+static int32_t ref_q4;                   // level of a full-scale tone: 0 dBFS
+static int bottom_db = -100;             // dBFS at the bottom edge, a multiple of 10
+
+static uint16_t log2_q4(uint64_t p);
+
 static uint8_t background_pixel(int type, int x) {
-    if (type == BG_GRID && (x & 3) == 0) return C3_BLUE;             // horizontal grid line, dotted
-    if (type != BG_PLAIN && x % 40 == 0) return C3_BLUE;             // vertical grid, dotted
+    if (type == BG_GRID && (x & 3) == 0) return C3_BLUE;                         // horizontal grid line, dotted
+    if (type != BG_PLAIN && (vline[x / 8] >> (x & 7) & 1)) return C3_BLUE;       // vertical grid, dotted
     return C3_BLACK;
 }
 
@@ -149,14 +181,74 @@ void spectrum_set_smoothing(spectrum_smoothing_t s) {
     smoothing.rise_shift = s.rise_shift > SPECTRUM_SHIFT_MAX ? SPECTRUM_SHIFT_MAX : s.rise_shift;
     smoothing.fall_shift = s.fall_shift > SPECTRUM_SHIFT_MAX ? SPECTRUM_SHIFT_MAX : s.fall_shift;
     smoothing.smooth_bins = s.smooth_bins ? 1 : 0;
+    smoothing.dc_remove = s.dc_remove ? 1 : 0;
 }
 
 spectrum_smoothing_t spectrum_get_smoothing(void) {
     return smoothing;
 }
 
-void spectrum_init(void) {
+// Text of a frequency in MHz with kHz: "9.995", "10.010"
+static void format_mhz_khz(uint32_t f, char *s) {
+    uint32_t mhz = f / 1000000, khz = f / 1000 % 1000;
+    int i = 0;
+    if (mhz >= 100) s[i++] = '0' + mhz / 100;
+    if (mhz >= 10) s[i++] = '0' + mhz / 10 % 10;
+    s[i++] = '0' + mhz % 10;
+    s[i++] = '.';
+    s[i++] = '0' + khz / 100;
+    s[i++] = '0' + khz / 10 % 10;
+    s[i++] = '0' + khz % 10;
+    s[i] = 0;
+}
+
+// Once per frame: grid lines and labels for the current dialled frequency and bottom level
+static void build_scale(void) {
+    uint32_t dial = iq_get_frequency();
+    int32_t first = (int32_t)(dial - SPAN_HZ / 2) / GRID_HZ * GRID_HZ;
+    for (int i = 0; i < W / 8; i++) vline[i] = 0;
+    n_scale_labels = 0;
+    for (int32_t f = first; f <= (int32_t)(dial + SPAN_HZ / 2) + GRID_HZ; f += GRID_HZ) {
+        int x = W / 2 + (int)((int64_t)(f - (int32_t)dial) * W / SPAN_HZ);
+        if (x < 0 || x >= W) continue;
+        vline[x / 8] |= (uint8_t)(1 << (x & 7));
+        if (f % (2 * GRID_HZ) == 0 && n_scale_labels < N_FLABELS) {
+            label_t *lb = &scale_labels[n_scale_labels];
+            format_mhz_khz((uint32_t)f, lb->text);
+            int len = 0;
+            while (lb->text[len]) len++;
+            lb->font = &Font_7x10;
+            lb->x = (int16_t)(x - len * Font_7x10.FontWidth / 2);
+            if (lb->x < 0 || lb->x + len * Font_7x10.FontWidth > W) continue; // would be cut at the edge
+            lb->y = 2;
+            lb->color = C3_WHITE;
+            n_scale_labels++;
+        }
+    }
     build_backgrounds();
+    // dB labels just under each horizontal line (not the top one: the frequency labels are there)
+    for (int k = 1; k <= N_DBLABELS; k++) {
+        label_t *lb = &scale_labels[n_scale_labels++];
+        int db = bottom_db + SPECTRUM_DB - 10 * k, a = db < 0 ? -db : db, i = 0;
+        if (db < 0) lb->text[i++] = '-';
+        if (a >= 100) lb->text[i++] = '0' + a / 100;
+        if (a >= 10) lb->text[i++] = '0' + a / 10 % 10;
+        lb->text[i++] = '0' + a % 10;
+        lb->text[i] = 0;
+        lb->font = &Font_7x10;
+        lb->x = 2;
+        lb->y = (int16_t)(k * ROWS_PER_10DB + 2);
+        lb->color = C3_CYAN;
+    }
+}
+
+void spectrum_init(void) {
+    // 0 dBFS: a complex tone of amplitude 2047 through the window (scaled >> 7 as in spectrum_capture), unscaled FFT
+    int64_t wsum = 0;
+    for (int i = 0; i < FFT_N; i++) wsum += fft_window[i];
+    uint64_t mag = (uint64_t)(2047 * wsum / 128);
+    ref_q4 = log2_q4(mag * mag);
+    build_scale();
     ili9488_fill_rect(0, 0, ILI9488_WIDTH, ILI9488_HEIGHT, 0, 0, 0);
     // Vertical scroll: top SPECTRUM_HEIGHT lines fixed, the rest scrolls (VSCRDEF), starting at WF_TOP (VSCRSADD)
     uint8_t def[] = {0, WF_TOP, WF_ROWS >> 8, WF_ROWS & 0xFF, 0, 0};
@@ -173,10 +265,22 @@ void spectrum_capture(const uint32_t *adc, int n) {
         return;
     }
     capture_count = 0;
+    // Optionally remove the DC (ADC offset, LO leakage), see SPECTRUM_DC_REMOVE; else just the ADC mid-scale
+    int32_t mean_i = 2048, mean_q = 2048;
+    if (smoothing.dc_remove) {
+        mean_i = 0;
+        mean_q = 0;
+        for (int i = 0; i < FFT_N; i++) {
+            mean_i += (int32_t)(adc[i] & 0xFFFF);
+            mean_q += (int32_t)(adc[i] >> 16);
+        }
+        mean_i /= FFT_N;
+        mean_q /= FFT_N;
+    }
     for (int i = 0; i < FFT_N; i++) {
         int32_t w = fft_window[i];
-        int32_t si = (int32_t)(adc[i] & 0xFFFF) - 2048;
-        int32_t sq = (int32_t)(adc[i] >> 16) - 2048;
+        int32_t si = (int32_t)(adc[i] & 0xFFFF) - mean_i;
+        int32_t sq = (int32_t)(adc[i] >> 16) - mean_q;
         re[fft_bitrev[i]] = (si * w) >> 7; // 12-bit x Q15 -> ~20 bits: room for the FFT's x256 growth in int32
         im[fft_bitrev[i]] = (sq * w) >> 7;
     }
@@ -230,17 +334,41 @@ static void compute_levels(void) {
         bin_level[b] += delta / (1 << (delta > 0 ? smoothing.rise_shift : smoothing.fall_shift)); // fast up, slow down
         sum += bin_level[b];
     }
+    // What is left of the DC spike (it wanders a little within one capture) spreads over the window's main lobe:
+    // draw the LO bin and its neighbours as a straight line between the bins either side
+    if (smoothing.dc_remove) {
+        int32_t l = bin_level[FFT_N / 2 - 2], r = bin_level[FFT_N / 2 + 2];
+        for (int d = -1; d <= 1; d++) {
+            bin_level[FFT_N / 2 + d] = (uint16_t)(l + (r - l) * (d + 2) / 4);
+        }
+    }
     int32_t target = sum / FFT_N - FLOOR_BELOW; // most bins are noise: track it so no level setup is needed
     floor_q4 += (target - floor_q4) / 8;
+    // Spectrum bottom edge: the tracked floor rounded to 10 dB, with 2 dB of hysteresis so it doesn't flicker
+    int floor_db = (floor_q4 - ref_q4) * 301 / 1600;
+    while (floor_db < bottom_db - 2) bottom_db -= 10;
+    while (floor_db > bottom_db + 12) bottom_db += 10;
+    int32_t bottom_q4 = ref_q4 + DB_Q4(bottom_db);
+    build_scale();
 
     tallest = 0;
+    int32_t offset = offset_hz_now;
     for (int x = 0; x < W; x++) {
-        // Screen columns sit between bins (256 -> 320): interpolate instead of repeating a bin as a step
-        int32_t pos = x * (FFT_N - 1) * 256 / (W - 1); // bin position, 8 fractional bits
-        int b = pos >> 8, frac = pos & 255;
-        int32_t lo = smoothed_bin(b), hi = b + 1 < FFT_N ? smoothed_bin(b + 1) : lo;
-        int32_t v = lo + (hi - lo) * frac / 256 - floor_q4;
-        int32_t h = v * SPEC_ROWS / SPECTRUM_RANGE;
+        // Frequency of this column relative to the LO, then its (fftshifted) bin position with 8 fractional bits;
+        // columns fall between bins: interpolate instead of repeating a bin as a step
+        int32_t hz = (x - W / 2) * SPAN_HZ / W + offset;
+        int32_t pos = FFT_N / 2 * 256 + hz * 256 / BIN_HZ;
+        int32_t level;
+        if (pos < 0 || pos > FFT_N * 256) {
+            level = 0; // beyond the I/Q band around the LO (doesn't happen with the offsets tune.c picks)
+        } else {
+            // the last bin (+31.75 kHz) and the first (-32 kHz = +32 kHz) are neighbours
+            int b = (pos >> 8) & (FFT_N - 1), frac = pos & 255;
+            int32_t lo = smoothed_bin(b), hi = smoothed_bin((b + 1) & (FFT_N - 1));
+            level = lo + (hi - lo) * frac / 256;
+        }
+        int32_t v = level - floor_q4;
+        int32_t h = (level - bottom_q4) * SPEC_ROWS / SPECTRUM_RANGE;
         column_height[x] = h < 0 ? 0 : (h >= SPEC_ROWS ? SPEC_ROWS - 1 : h);
         if (column_height[x] > tallest) tallest = column_height[x];
         int32_t c = v * WF_PALETTE / WATERFALL_RANGE;
@@ -260,10 +388,11 @@ static void compute_levels(void) {
 static void fill_stripe(int y0) {
     uint8_t *p = stripe;
     for (int y = y0; y < y0 + STRIPE; y++, p += W / 2) {
-        const uint8_t *bg = background[(y & 31) == 0 ? BG_GRID : (y & 3) == 0 ? BG_DOTS : BG_PLAIN];
+        const uint8_t *bg = background[y % ROWS_PER_10DB == 0 ? BG_GRID : (y & 3) == 0 ? BG_DOTS : BG_PLAIN];
         int threshold = SPEC_ROWS - y; // a column reaches this row if its height is at least this
         if (tallest < threshold) {
             for (int i = 0; i < W / 2; i++) p[i] = bg[i];
+            draw_labels(p, y, scale_labels, n_scale_labels);
             put_marker(p);
             continue;
         }
@@ -273,6 +402,7 @@ static void fill_stripe(int y0) {
             if (column_height[2 * i + 1] >= threshold) v = (uint8_t)((v & 0x38) | C3_GREEN);
             p[i] = v;
         }
+        draw_labels(p, y, scale_labels, n_scale_labels);
         put_marker(p);
     }
 }

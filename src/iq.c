@@ -133,16 +133,24 @@ int iq_tx_poll(void) {
  * On-board radio: the LO goes on a spur-free point near the dialled frequency and the rest is shifted by the
  * NCO in ssb_rx / ssb_tx (see tune.h). While the host streams I/Q it expects the dialled frequency at 0 Hz,
  * so then (or when no spur-free point is near) the LO is tuned exactly as before. Duplex too: RX + TX already
- * take ~90% of the CPU, and the two NCOs at 64 kHz make the I2S refill late.
+ * take ~90% of the CPU, and the two NCOs at 64 kHz make the I2S refill late. And transmit: the 64 kHz DAC has
+ * an image at f - 64 kHz that only its sinc response weakens, ~27 dB at offset 0 but only ~3 dB with the band
+ * shifted +26 kHz, so the transmitter keeps the LO on the dialled frequency (the receiver is muted then anyway).
  */
 volatile uint8_t tune_debug_exact; // debugger: 1 = always tune the LO exactly (no NCO), for comparisons
 
 static void retune(void) {
+    static tune_t applied; // the grid LO now in the Si5351 (div 0: none, the LO was tuned exactly)
     tune_t t;
-    if (!tune_debug_exact && !rx_streaming && tx_from_mic && ptt != RADIO_DUPLEX && tune_choose(lo_frequency, PASSBAND_LO, PASSBAND_HI, &t)) {
-        si5351_set_lo_rational(t.n, t.q, t.div, SI5351_DRIVE_STRENGTH_2MA);
+    if (!tune_debug_exact && !rx_streaming && tx_from_mic && ptt == RADIO_RX && tune_choose(lo_frequency, PASSBAND_LO, PASSBAND_HI, &t)) {
+        // Steps within the same 8 kHz grid cell only move the NCO: don't rewrite (and reset) the PLL for them
+        if (t.n != applied.n || t.q != applied.q || t.div != applied.div) {
+            si5351_set_lo_rational(t.n, t.q, t.div, SI5351_DRIVE_STRENGTH_2MA);
+            applied = t;
+        }
     } else {
         si5351_set_frequency((int32_t)lo_frequency, SI5351_DRIVE_STRENGTH_2MA);
+        applied.div = 0;
         t.offset_hz = 0;
         t.nco_step = 0;
     }
@@ -261,18 +269,19 @@ static void handle_mic_gain(const frame_t* frame) {
     command_send(RESP_ACK, frame->command.seq, &g, sizeof(g));
 }
 
-// Empty payload: report; 3 bytes [rise_shift, fall_shift, smooth_bins]: set the TFT spectrum smoothing.
-// ACK carries the values in effect (clamped).
+// Empty payload: report; 3 bytes [rise_shift, fall_shift, smooth_bins] (+ optional [dc_remove]): set the TFT
+// spectrum smoothing (and DC hiding). ACK carries the 4 values in effect (clamped).
 static void handle_spectrum(const frame_t* frame) {
-    if (frame->command.len == 3) {
-        spectrum_smoothing_t s = {frame->payload[0], frame->payload[1], frame->payload[2]};
+    if (frame->command.len == 3 || frame->command.len == 4) {
+        spectrum_smoothing_t s = {frame->payload[0], frame->payload[1], frame->payload[2],
+                                  frame->command.len == 4 ? frame->payload[3] : spectrum_get_smoothing().dc_remove};
         spectrum_set_smoothing(s);
     } else if (frame->command.len != 0) {
         command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
         return;
     }
     spectrum_smoothing_t s = spectrum_get_smoothing();
-    uint8_t reply[] = {s.rise_shift, s.fall_shift, s.smooth_bins};
+    uint8_t reply[] = {s.rise_shift, s.fall_shift, s.smooth_bins, s.dc_remove};
     command_send(RESP_ACK, frame->command.seq, reply, sizeof(reply));
 }
 
