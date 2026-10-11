@@ -23,6 +23,9 @@
 // n mic samples (12-bit right-aligned, n a multiple of 8) -> n DAC words (I low half, Q high half)
 void ssb_tx_process(const uint16_t *mic, int n, uint32_t *dac);
 
+// Fine tuning: offset_step = (dialled - LO) / 64 kHz * 2^32 (tune_t.nco_step), 0 = none
+void ssb_tx_set_offset(int32_t offset_step);
+
 void ssb_tx_set_gain(uint8_t gain);
 uint8_t ssb_tx_get_gain(void);
 

@@ -90,6 +90,8 @@ extern volatile int8_t si5351_phase_trim;
 // Queues the I/Q LO retune; si5351_poll() writes it out in short I2C bursts from the main loop
 void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength);
 void si5351_set_frequency_blocking(int32_t frequency, si5351DriveStrength_t strength);
+// Queues the I/Q LO at exactly 25 MHz * n / (q * div) (PLL fraction n%q / q, 9 <= div <= 127); see tune.c
+void si5351_set_lo_rational(uint32_t n, uint32_t q, uint32_t div, si5351DriveStrength_t strength);
 int si5351_poll(void); // 1 when nothing is pending
 
 #endif

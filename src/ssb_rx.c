@@ -2,6 +2,7 @@
 #include "ssb_taps.h"
 #include "dsp.h"
 #include "i2s.h"
+#include "nco.h"
 
 /* ---- Demodulator: 64 kHz I/Q -> 8 kHz audio ---- */
 
@@ -54,10 +55,24 @@ uint8_t ssb_rx_get_volume(void) {
 static const uint32_t *queued_buf;
 static int queued_n;
 
+// Digital fine tuning (tune.c): the dialled frequency sits at +offset in the I/Q, rotate it down to 0 Hz
+static uint32_t nco_phase;
+static int32_t nco_step; // -offset / 64 kHz * 2^32
+
+void ssb_rx_set_offset(int32_t offset_step) {
+    nco_step = -offset_step;
+}
+
 static void demodulate(const uint32_t *buf, int n) {
     for (int i = 0; i < n; i++) {
-        const int16_t *xai = fir_push(&ai, (int16_t)(((int32_t)(buf[i] & 0xFFFF) - 2048) << 4));
-        const int16_t *xaq = fir_push(&aq, (int16_t)(((int32_t)(buf[i] >> 16) - 2048) << 4));
+        int32_t si = ((int32_t)(buf[i] & 0xFFFF) - 2048) << 4;
+        int32_t sq = ((int32_t)(buf[i] >> 16) - 2048) << 4;
+        if (nco_step) {
+            nco_rotate(&si, &sq, nco_phase);
+            nco_phase += (uint32_t)nco_step;
+        }
+        const int16_t *xai = fir_push(&ai, sat16(si));
+        const int16_t *xaq = fir_push(&aq, sat16(sq));
         if (++a_count < 4) continue;
         a_count = 0;
 
@@ -90,14 +105,15 @@ void ssb_rx_process_adc(const uint32_t *buf, int n) {
     queued_n = n;
 }
 
-void ssb_rx_poll(void) {
+int ssb_rx_poll(void) {
     if (queued_n == 0) {
-        return;
+        return 0;
     }
     int n = queued_n < POLL_CHUNK ? queued_n : POLL_CHUNK;
     demodulate(queued_buf, n);
     queued_buf += n;
     queued_n -= n;
+    return 1;
 }
 
 static int32_t resample_next(void) {

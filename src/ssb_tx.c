@@ -1,6 +1,7 @@
 #include "ssb_tx.h"
 #include "ssb_taps.h"
 #include "dsp.h"
+#include "nco.h"
 
 static int16_t a_hist[2 * A_TAPS], b_hist[2 * B_TAPS], c_hist[2 * C_TAPS];
 static int16_t d_hist_i[2 * D_TAPS], d_hist_q[2 * D_TAPS];
@@ -14,6 +15,14 @@ static fir_hist_t d_q = {d_hist_q, D_TAPS, 0};
 static int a_count, b_count;
 
 static uint8_t gain = SSB_TX_GAIN_DEFAULT;
+
+// Digital fine tuning (tune.c): shift the baseband up by the offset between the LO and the dialled frequency
+static uint32_t nco_phase;
+static int32_t nco_step;
+
+void ssb_tx_set_offset(int32_t offset_step) {
+    nco_step = offset_step;
+}
 
 void ssb_tx_set_gain(uint8_t g) {
     gain = g;
@@ -51,7 +60,12 @@ void ssb_tx_process(const uint16_t *mic, int n, uint32_t *dac) {
         uint32_t *out = &dac[i - 7];
         for (int p = 0; p < D_PHASES; p++) {
             const int16_t *h = &taps_d[p * D_TAPS];
-            out[p] = to_dac(fir_dot(h, xi, D_TAPS) >> 15) | (to_dac(fir_dot(h, xq, D_TAPS) >> 15) << 16);
+            int32_t oi = fir_dot(h, xi, D_TAPS) >> 15, oq = fir_dot(h, xq, D_TAPS) >> 15;
+            if (nco_step) {
+                nco_rotate(&oi, &oq, nco_phase);
+                nco_phase += (uint32_t)nco_step;
+            }
+            out[p] = to_dac(oi) | (to_dac(oq) << 16);
         }
     }
 }

@@ -394,8 +394,13 @@ void si5351_write(uint8_t reg, uint8_t value) {
 // applied on the next poll by re-running the last tune
 volatile int8_t si5351_phase_trim = SI5351_PHASE_TRIM_DEFAULT;
 static int8_t trim_applied;
-static int32_t last_frequency;
 static si5351DriveStrength_t last_strength;
+// What the LO was last tuned to, so a trim change can redo it: an exact frequency, or a rational n/q, div
+static int32_t last_frequency;
+static uint32_t last_n, last_q, last_div;
+
+// Debug: nonzero = use this output divider instead of si5351_CalcIQ()'s choice (next retune)
+volatile uint8_t si5351_debug_div;
 
 // Debug: set to 1 over SWD to stop the I/Q LO (CLK0/CLK1 off, CLK2 = MCU clock stays on), 0 to restart it.
 // Freezes both mixers so couplings that need the LO switching can be told apart from plain baseband ones.
@@ -403,12 +408,16 @@ volatile uint8_t si5351_debug_lo_off;
 
 int si5351_poll(void) {
     static uint8_t lo_off_applied;
-    if (si5351_phase_trim != trim_applied && queue_pos >= queue_len && last_frequency) {
-        si5351_set_frequency(last_frequency, last_strength);
+    if (si5351_phase_trim != trim_applied && queue_pos >= queue_len) {
+        if (last_div) {
+            si5351_set_lo_rational(last_n, last_q, last_div, last_strength);
+        } else if (last_frequency) {
+            si5351_set_frequency(last_frequency, last_strength);
+        }
     }
     if (si5351_debug_lo_off != lo_off_applied && queue_pos >= queue_len) {
         lo_off_applied = si5351_debug_lo_off;
-        si5351_EnableOutputs(lo_off_applied ? (1 << 2) : ((1 << 0) | (1 << 1) | (1 << 2)));
+        si5351_EnableOutputs(lo_off_applied ? (1 << 2) : ((1 << 0) | (1 << 1) | (1 << 2))); // CLK2 = MCU clock
     }
     if (queue_pos >= queue_len) {
         return 1;
@@ -455,6 +464,28 @@ void si5351_clk2_8mhz() {
     si5351_EnableOutputs(enable);
 }
 
+// Writes (queues) PLL A + CLK0/CLK1 with the 90 deg (+trim) phase offset between them; ends recording
+static void program_iq(si5351PLLConfig_t *pll_conf, si5351OutputConfig_t *out_conf, si5351DriveStrength_t strength) {
+    // Quadrature trim: CLK1 (LO-Q) leads/lags CLK0 (LO-I) by 90 deg + trim steps, one step = 90/div deg
+    // (~1 deg at 10 MHz). Board skew between the LO-I and LO-Q paths otherwise leaves the image ~24 dB down.
+    int32_t trim = si5351_phase_trim;
+    int32_t off0 = trim < 0 ? -trim : 0;
+    int32_t off1 = out_conf->div + (trim > 0 ? trim : 0);
+    if (off0 > 127) off0 = 127;
+    if (off1 > 127) off1 = 127;
+    trim_applied = si5351_phase_trim;
+    last_strength = strength;
+
+    si5351_SetupOutput(0, SI5351_PLL_A, strength, out_conf, (uint8_t)off0);
+    si5351_SetupOutput(1, SI5351_PLL_A, strength, out_conf, (uint8_t)off1);
+    si5351_SetupPLL(SI5351_PLL_A, pll_conf);
+
+    int enable = (1<<0)|(1<<1)|(1<<2); // CLK2 = MCU clock
+    si5351_EnableOutputs(enable);
+    recording = 0;
+}
+
+
 // Queues the retune (restarting any retune still in flight); si5351_poll() applies it
 void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength) {
     recording = 1;
@@ -483,24 +514,39 @@ void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength) {
     
     si5351_CalcIQ(frequency, &pll_conf, &out_conf);
 
-    // Quadrature trim: CLK1 (LO-Q) leads/lags CLK0 (LO-I) by 90 deg + trim steps, one step = 90/div deg
-    // (~1 deg at 10 MHz). Board skew between the LO-I and LO-Q paths otherwise leaves the image ~24 dB down.
-    int32_t trim = si5351_phase_trim;
-    int32_t off0 = trim < 0 ? -trim : 0;
-    int32_t off1 = out_conf.div + (trim > 0 ? trim : 0);
-    if (off0 > 127) off0 = 127;
-    if (off1 > 127) off1 = 127;
-    trim_applied = si5351_phase_trim;
+    // Debug: force the output divider (set over SWD) to try other PLL fractions for the same frequency
+    if (si5351_debug_div >= 9 && si5351_debug_div <= 127) {
+        int64_t fpll = (int64_t)frequency * si5351_debug_div;
+        if (fpll >= 600000000LL && fpll <= 900000000LL) {
+            out_conf.div = si5351_debug_div;
+            pll_conf.mult = (int32_t)(fpll / 25000000);
+            pll_conf.num = (int32_t)((fpll % 25000000) / 24);
+            pll_conf.denom = 25000000 / 24;
+        }
+    }
+
     last_frequency = frequency;
-    last_strength = strength;
+    last_div = 0;
+    program_iq(&pll_conf, &out_conf, strength);
+}
 
-    si5351_SetupOutput(0, SI5351_PLL_A, strength, &out_conf, (uint8_t)off0);
-    si5351_SetupOutput(1, SI5351_PLL_A, strength, &out_conf, (uint8_t)off1);
-    si5351_SetupPLL(SI5351_PLL_A, &pll_conf);
+/*
+ * LO at exactly 25 MHz * n / (q * div): PLL = 25 MHz * n/q (fraction n%q / q, q small), integer output divider.
+ * Fractional-N spurs of such a PLL sit at multiples of 25 MHz / (q * div) from the carrier, so with q*div kept
+ * small they stay outside the receiver's +-32 kHz (tune.c picks n, q, div). Queued like si5351_set_frequency().
+ */
+void si5351_set_lo_rational(uint32_t n, uint32_t q, uint32_t div, si5351DriveStrength_t strength) {
+    recording = 1;
+    queue_len = 0;
+    queue_pos = 0;
 
-    int enable = (1<<0)|(1<<1)|(1<<2);
-    si5351_EnableOutputs(enable);
-    recording = 0;
+    si5351PLLConfig_t pll_conf = {(int32_t)(n / q), (int32_t)(n % q), (int32_t)q};
+    si5351OutputConfig_t out_conf = {0, (int32_t)div, 0, 1, SI5351_R_DIV_1};
+
+    last_n = n;
+    last_q = q;
+    last_div = div;
+    program_iq(&pll_conf, &out_conf, strength);
 }
 
 void si5351_set_frequency_blocking(int32_t frequency, si5351DriveStrength_t strength) {

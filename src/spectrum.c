@@ -30,6 +30,22 @@ static int32_t floor_q4 = DB_Q4(80);
 static spectrum_smoothing_t smoothing = {SPECTRUM_RISE_SHIFT, SPECTRUM_FALL_SHIFT, SPECTRUM_SMOOTH_BINS};
 
 static int capture_count, fft_stage, stripe_y;
+static int marker_x = W / 2; // red line: the dialled frequency, LO + digital offset
+
+void spectrum_set_offset(int32_t offset_hz) {
+    int x = W / 2 + (int)((int64_t)offset_hz * W / 64000);
+    marker_x = x < 0 ? 0 : (x >= W ? W - 1 : x);
+}
+
+// Red marker into a 3-bit row, unless a spectrum bar already covers that pixel
+static void put_marker(uint8_t *row) {
+    uint8_t *b = &row[marker_x / 2];
+    if (marker_x & 1) {
+        if ((*b & 0x07) != C3_GREEN) *b = (uint8_t)((*b & 0x38) | C3_RED);
+    } else {
+        if ((*b >> 3) != C3_GREEN) *b = (uint8_t)((*b & 0x07) | C3_RED << 3);
+    }
+}
 
 /* ---- Header: frequency, mode and tuning step, redrawn (in stripes, 3-bit colour) only when they change ---- */
 
@@ -116,7 +132,6 @@ static uint8_t background[3][W / 2];
 static uint8_t tallest;
 
 static uint8_t background_pixel(int type, int x) {
-    if (x == W / 2) return C3_RED;                                   // LO
     if (type == BG_GRID && (x & 3) == 0) return C3_BLUE;             // horizontal grid line, dotted
     if (type != BG_PLAIN && x % 40 == 0) return C3_BLUE;             // vertical grid, dotted
     return C3_BLACK;
@@ -249,6 +264,7 @@ static void fill_stripe(int y0) {
         int threshold = SPEC_ROWS - y; // a column reaches this row if its height is at least this
         if (tallest < threshold) {
             for (int i = 0; i < W / 2; i++) p[i] = bg[i];
+            put_marker(p);
             continue;
         }
         for (int i = 0; i < W / 2; i++) {
@@ -257,6 +273,7 @@ static void fill_stripe(int y0) {
             if (column_height[2 * i + 1] >= threshold) v = (uint8_t)((v & 0x38) | C3_GREEN);
             p[i] = v;
         }
+        put_marker(p);
     }
 }
 

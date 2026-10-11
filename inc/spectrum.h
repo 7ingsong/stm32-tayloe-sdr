@@ -41,6 +41,8 @@ typedef struct {
 void spectrum_set_smoothing(spectrum_smoothing_t s); // out-of-range values are clamped
 spectrum_smoothing_t spectrum_get_smoothing(void);
 
+void spectrum_set_offset(int32_t offset_hz); // dialled frequency - LO: moves the red marker
+
 void spectrum_init(void);                                // after ili9488_init(); blocks ~0.2 s clearing the screen
 void spectrum_capture(const uint32_t *adc, int n);       // every ADC DMA half-buffer (I low half-word, Q high)
 void spectrum_poll(void);                                // every main-loop pass; one short step per call

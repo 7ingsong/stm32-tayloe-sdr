@@ -22,7 +22,10 @@
 // Queue n ADC DMA words (I low half-word, Q high); the buffer must stay valid until ssb_rx_poll() drained it
 void ssb_rx_process_adc(const uint32_t *buf, int n);
 // Demodulate the next small chunk of the queued block; call every main-loop pass
-void ssb_rx_poll(void);
+int ssb_rx_poll(void); // demodulates the next small chunk; 0 = nothing queued
+
+// Fine tuning: offset_step = (dialled - LO) / 64 kHz * 2^32 (tune_t.nco_step), 0 = none
+void ssb_rx_set_offset(int32_t offset_step);
 
 void ssb_rx_set_volume(uint8_t volume);
 uint8_t ssb_rx_get_volume(void);

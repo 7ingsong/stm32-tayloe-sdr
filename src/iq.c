@@ -11,6 +11,7 @@
 #include "mic.h"
 #include "ssb_tx.h"
 #include "spectrum.h"
+#include "tune.h"
 
 typedef struct __attribute__((packed)) {
     uint32_t overflow;
@@ -57,8 +58,14 @@ uint8_t iq_get_ptt(void) {
     return ptt;
 }
 
+static void retune(void);
+
 void iq_set_ptt(uint8_t mode) {
-    ptt = mode > RADIO_DUPLEX ? RADIO_DUPLEX : mode;
+    mode = mode > RADIO_DUPLEX ? RADIO_DUPLEX : mode;
+    if (mode != ptt) {
+        ptt = mode;
+        retune(); // duplex tunes the LO exactly, see retune()
+    }
 }
 
 #define RX_FRAMES_PER_PASS 4 // ~0.25 ms of checksums and copies
@@ -110,15 +117,43 @@ void on_mic(uint16_t *buf, int n) {
     mic_queued = n;
 }
 
-void iq_tx_poll(void) {
+int iq_tx_poll(void) {
     if (mic_queued > 0 && tx_from_mic) {
         tx_chunk();
+        return 1;
     }
+    return 0;
+}
+
+// SSB audio band around the dialled frequency, for both on-board chains (tune_choose keeps it off 0 Hz)
+#define PASSBAND_LO ((SSB_RX_LSB || SSB_TX_LSB) ? -2800 : 300)
+#define PASSBAND_HI ((SSB_RX_LSB && SSB_TX_LSB) ? -300 : 2800)
+
+/*
+ * On-board radio: the LO goes on a spur-free point near the dialled frequency and the rest is shifted by the
+ * NCO in ssb_rx / ssb_tx (see tune.h). While the host streams I/Q it expects the dialled frequency at 0 Hz,
+ * so then (or when no spur-free point is near) the LO is tuned exactly as before. Duplex too: RX + TX already
+ * take ~90% of the CPU, and the two NCOs at 64 kHz make the I2S refill late.
+ */
+volatile uint8_t tune_debug_exact; // debugger: 1 = always tune the LO exactly (no NCO), for comparisons
+
+static void retune(void) {
+    tune_t t;
+    if (!tune_debug_exact && !rx_streaming && tx_from_mic && ptt != RADIO_DUPLEX && tune_choose(lo_frequency, PASSBAND_LO, PASSBAND_HI, &t)) {
+        si5351_set_lo_rational(t.n, t.q, t.div, SI5351_DRIVE_STRENGTH_2MA);
+    } else {
+        si5351_set_frequency((int32_t)lo_frequency, SI5351_DRIVE_STRENGTH_2MA);
+        t.offset_hz = 0;
+        t.nco_step = 0;
+    }
+    ssb_rx_set_offset(t.nco_step);
+    ssb_tx_set_offset(t.nco_step);
+    spectrum_set_offset(t.offset_hz);
 }
 
 void iq_set_frequency(uint32_t frequency) {
     lo_frequency = frequency;
-    si5351_set_frequency((int32_t)frequency, SI5351_DRIVE_STRENGTH_2MA);
+    retune();
 }
 
 uint32_t iq_get_frequency(void) {
@@ -269,21 +304,25 @@ void command_handler(const frame_t* frame) {
             tx_from_mic = 0;
             mic_queued = 0;
             dac_restart_fifo(0); // the host fills it from here
+            retune();
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
         case CMD_IQ_STREAM_TX_STOP:
             tx_from_mic = 1;
             dac_restart_fifo(DAC_PRIME_BLOCKS);
+            retune();
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
 
         case CMD_IQ_STREAM_RX_START:
             fifo_adc.tail = fifo_adc.head; // start from fresh samples
             rx_streaming = 1;
+            retune();
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
         case CMD_IQ_STREAM_RX_STOP:
             rx_streaming = 0;
+            retune();
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;
 

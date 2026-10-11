@@ -16,6 +16,6 @@ uint32_t iq_get_frequency(void);
 enum { RADIO_RX = 0, RADIO_TX = 1, RADIO_DUPLEX = 2 };
 uint8_t iq_get_ptt(void);
 void iq_set_ptt(uint8_t mode); // larger values are clamped to RADIO_DUPLEX
-void iq_tx_poll(void);         // modulates the next small chunk of the queued mic block; call often
+int iq_tx_poll(void);          // modulates the next small chunk of the queued mic block; 0 = nothing queued
 
 #endif
