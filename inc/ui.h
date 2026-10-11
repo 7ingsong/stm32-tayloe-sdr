@@ -1,5 +1,6 @@
 #ifndef _UI
 #define _UI
+#include <stdint.h>
 
 /*
  * Front panel: 0.91" SSD1306 OLED (128x32, I2C1 shared with the Si5351) and the EC11 encoder.
@@ -24,6 +25,9 @@
 #ifndef UI_LONG_PRESS_MS
 #define UI_LONG_PRESS_MS 700
 #endif
+
+uint32_t ui_get_frequency(void);  // the LO the user dialled (shown at once, retune follows within ~20 ms)
+const char *ui_get_step_name(void);
 
 void ui_init(void);  // after clock_init() and iq_set_frequency(); blocks ~20 ms to bring up the display
 void ui_poll(void);  // every main-loop pass; never blocks for more than one ~0.5 ms I2C chunk

@@ -390,7 +390,26 @@ void si5351_write(uint8_t reg, uint8_t value) {
     I2C_WriteByte(SI5351_ADDRESS, reg, value);
 }
 
+// LO-Q phase trim in Si5351 phase-offset steps (see si5351_set_frequency); writable over SWD or CMD_LO_PHASE,
+// applied on the next poll by re-running the last tune
+volatile int8_t si5351_phase_trim = SI5351_PHASE_TRIM_DEFAULT;
+static int8_t trim_applied;
+static int32_t last_frequency;
+static si5351DriveStrength_t last_strength;
+
+// Debug: set to 1 over SWD to stop the I/Q LO (CLK0/CLK1 off, CLK2 = MCU clock stays on), 0 to restart it.
+// Freezes both mixers so couplings that need the LO switching can be told apart from plain baseband ones.
+volatile uint8_t si5351_debug_lo_off;
+
 int si5351_poll(void) {
+    static uint8_t lo_off_applied;
+    if (si5351_phase_trim != trim_applied && queue_pos >= queue_len && last_frequency) {
+        si5351_set_frequency(last_frequency, last_strength);
+    }
+    if (si5351_debug_lo_off != lo_off_applied && queue_pos >= queue_len) {
+        lo_off_applied = si5351_debug_lo_off;
+        si5351_EnableOutputs(lo_off_applied ? (1 << 2) : ((1 << 0) | (1 << 1) | (1 << 2)));
+    }
     if (queue_pos >= queue_len) {
         return 1;
     }
@@ -464,8 +483,19 @@ void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength) {
     
     si5351_CalcIQ(frequency, &pll_conf, &out_conf);
 
-    si5351_SetupOutput(0, SI5351_PLL_A, strength, &out_conf, 0);
-    si5351_SetupOutput(1, SI5351_PLL_A, strength, &out_conf, (uint8_t)out_conf.div);
+    // Quadrature trim: CLK1 (LO-Q) leads/lags CLK0 (LO-I) by 90 deg + trim steps, one step = 90/div deg
+    // (~1 deg at 10 MHz). Board skew between the LO-I and LO-Q paths otherwise leaves the image ~24 dB down.
+    int32_t trim = si5351_phase_trim;
+    int32_t off0 = trim < 0 ? -trim : 0;
+    int32_t off1 = out_conf.div + (trim > 0 ? trim : 0);
+    if (off0 > 127) off0 = 127;
+    if (off1 > 127) off1 = 127;
+    trim_applied = si5351_phase_trim;
+    last_frequency = frequency;
+    last_strength = strength;
+
+    si5351_SetupOutput(0, SI5351_PLL_A, strength, &out_conf, (uint8_t)off0);
+    si5351_SetupOutput(1, SI5351_PLL_A, strength, &out_conf, (uint8_t)off1);
     si5351_SetupPLL(SI5351_PLL_A, &pll_conf);
 
     int enable = (1<<0)|(1<<1)|(1<<2);

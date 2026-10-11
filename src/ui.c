@@ -86,6 +86,14 @@ static int render_piece(void) {
     return 0;
 }
 
+uint32_t ui_get_frequency(void) {
+    return freq;
+}
+
+const char *ui_get_step_name(void) {
+    return step_name[step];
+}
+
 void ui_init(void) {
     EC11_Init();
     freq = iq_get_frequency();

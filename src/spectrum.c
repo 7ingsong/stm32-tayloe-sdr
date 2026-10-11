@@ -1,8 +1,13 @@
 #include "spectrum.h"
 #include "spectrum_tables.h"
 #include "ili9488.h"
+#include "fonts.h"
+#include "iq.h"
+#include "ui.h"
 
 #define W        ILI9488_WIDTH
+#define HEADER   32                                // text rows above the spectrum: frequency, mode, step
+#define SPEC_ROWS (SPECTRUM_HEIGHT - HEADER)        // 128, a multiple of STRIPE
 #define WF_TOP   SPECTRUM_HEIGHT
 #define WF_ROWS  (ILI9488_HEIGHT - SPECTRUM_HEIGHT)
 #define STRIPE   4 // spectrum rows per DMA transfer
@@ -13,7 +18,7 @@
 #define WATERFALL_RANGE DB_Q4(40)  // dB from black to white in the waterfall
 #define FLOOR_BELOW     DB_Q4(10)  // the bottom edge sits this far below the average bin (noise floor)
 
-static enum { IDLE, FFT, LEVELS, SPECTRUM, WATERFALL, SCROLL } state = IDLE;
+static enum { IDLE, HEADER_DRAW, FFT, LEVELS, SPECTRUM, WATERFALL, SCROLL } state = IDLE;
 
 static int32_t re[FFT_N], im[FFT_N];
 static uint16_t bin_level[FFT_N];  // smoothed q4 level per bin, already in display order (-fs/2 .. +fs/2)
@@ -25,6 +30,85 @@ static int32_t floor_q4 = DB_Q4(80);
 static spectrum_smoothing_t smoothing = {SPECTRUM_RISE_SHIFT, SPECTRUM_FALL_SHIFT, SPECTRUM_SMOOTH_BINS};
 
 static int capture_count, fft_stage, stripe_y;
+
+/* ---- Header: frequency, mode and tuning step, redrawn (in stripes, 3-bit colour) only when they change ---- */
+
+typedef struct {
+    char text[12];
+    const FontDef *font;
+    int16_t x, y;
+    uint8_t color;
+} label_t;
+
+static label_t labels[3];
+static uint32_t shown_freq = 0xFFFFFFFF;
+static uint8_t shown_mode = 0xFF;
+static const char *shown_step;
+
+// "dd.ddd.ddd", leading zero of the MHz part blanked; 11 chars at 100 MHz
+static void format_frequency(uint32_t f, char *s) {
+    uint32_t mhz = f / 1000000, khz = f / 1000 % 1000, hz = f % 1000;
+    int i = 0;
+    if (mhz >= 100) s[i++] = '0' + mhz / 100;
+    s[i++] = mhz >= 10 ? '0' + mhz / 10 % 10 : ' ';
+    s[i++] = '0' + mhz % 10;
+    s[i++] = '.';
+    s[i++] = '0' + khz / 100;
+    s[i++] = '0' + khz / 10 % 10;
+    s[i++] = '0' + khz % 10;
+    s[i++] = '.';
+    s[i++] = '0' + hz / 100;
+    s[i++] = '0' + hz / 10 % 10;
+    s[i++] = '0' + hz % 10;
+    s[i] = 0;
+}
+
+static int header_changed(void) {
+    return ui_get_frequency() != shown_freq || iq_get_ptt() != shown_mode || ui_get_step_name() != shown_step;
+}
+
+static void build_header(void) {
+    static const char *const mode_text[] = {"RX", "TX", "DX"};
+    static const uint8_t mode_color[] = {C3_GREEN, C3_RED, C3_YELLOW};
+    shown_freq = ui_get_frequency();
+    shown_mode = iq_get_ptt();
+    shown_step = ui_get_step_name();
+
+    format_frequency(shown_freq, labels[0].text);
+    labels[0].font = &Font_16x26; labels[0].x = 2;   labels[0].y = 3;  labels[0].color = C3_WHITE;
+    labels[1].text[0] = mode_text[shown_mode][0]; labels[1].text[1] = mode_text[shown_mode][1]; labels[1].text[2] = 0;
+    labels[1].font = &Font_11x18; labels[1].x = 196; labels[1].y = 7;  labels[1].color = mode_color[shown_mode];
+    int i = 0;
+    for (const char *p = shown_step; *p && i < 11; p++) labels[2].text[i++] = *p;
+    labels[2].text[i] = 0;
+    labels[2].font = &Font_7x10;  labels[2].x = 236; labels[2].y = 11; labels[2].color = C3_CYAN;
+}
+
+static void put_pixel(uint8_t *row, int x, uint8_t color) {
+    if (x < 0 || x >= W) return;
+    uint8_t *b = &row[x / 2];
+    *b = (x & 1) ? (uint8_t)((*b & 0x38) | color) : (uint8_t)((*b & 0x07) | color << 3);
+}
+
+static void fill_header_stripe(int y0) {
+    uint8_t *row = stripe;
+    for (int y = y0; y < y0 + STRIPE; y++, row += W / 2) {
+        uint8_t bg = y == HEADER - 1 ? (C3_BLUE << 3 | C3_BLUE) : 0; // thin line under the header
+        for (int i = 0; i < W / 2; i++) row[i] = bg;
+        for (int l = 0; l < 3; l++) {
+            const label_t *lb = &labels[l];
+            int fy = y - lb->y;
+            if (fy < 0 || fy >= lb->font->FontHeight) continue;
+            int x = lb->x;
+            for (const char *c = lb->text; *c; c++, x += lb->font->FontWidth) {
+                uint16_t bits = lb->font->data[(*c - 32) * lb->font->FontHeight + fy];
+                for (int fx = 0; bits && fx < lb->font->FontWidth; fx++, bits <<= 1) {
+                    if (bits & 0x8000) put_pixel(row, x + fx, lb->color);
+                }
+            }
+        }
+    }
+}
 static uint16_t wf_line = WF_TOP; // GRAM line currently shown at the top of the waterfall
 
 enum { BG_PLAIN, BG_DOTS, BG_GRID };
@@ -139,8 +223,8 @@ static void compute_levels(void) {
         int b = pos >> 8, frac = pos & 255;
         int32_t lo = smoothed_bin(b), hi = b + 1 < FFT_N ? smoothed_bin(b + 1) : lo;
         int32_t v = lo + (hi - lo) * frac / 256 - floor_q4;
-        int32_t h = v * SPECTRUM_HEIGHT / SPECTRUM_RANGE;
-        column_height[x] = h < 0 ? 0 : (h >= SPECTRUM_HEIGHT ? SPECTRUM_HEIGHT - 1 : h);
+        int32_t h = v * SPEC_ROWS / SPECTRUM_RANGE;
+        column_height[x] = h < 0 ? 0 : (h >= SPEC_ROWS ? SPEC_ROWS - 1 : h);
         if (column_height[x] > tallest) tallest = column_height[x];
         int32_t c = v * WF_PALETTE / WATERFALL_RANGE;
         c = c < 0 ? 0 : (c >= WF_PALETTE ? WF_PALETTE - 1 : c);
@@ -155,11 +239,12 @@ static void compute_levels(void) {
  * from one of three precomputed backgrounds (plain, vertical-grid dots, horizontal grid line, all with the LO
  * line) and only columns tall enough to reach the row get painted green. Rows above the tallest column are a copy.
  */
+// y0 counts rows of the spectrum area (0 = its top, just under the header)
 static void fill_stripe(int y0) {
     uint8_t *p = stripe;
     for (int y = y0; y < y0 + STRIPE; y++, p += W / 2) {
         const uint8_t *bg = background[(y & 31) == 0 ? BG_GRID : (y & 3) == 0 ? BG_DOTS : BG_PLAIN];
-        int threshold = SPECTRUM_HEIGHT - y; // a column reaches this row if its height is at least this
+        int threshold = SPEC_ROWS - y; // a column reaches this row if its height is at least this
         if (tallest < threshold) {
             for (int i = 0; i < W / 2; i++) p[i] = bg[i];
             continue;
@@ -179,6 +264,21 @@ void spectrum_poll(void) {
     }
     switch (state) {
     case IDLE:
+        if (header_changed()) {
+            build_header();
+            ili9488_set_format(ILI9488_RGB111);
+            ili9488_set_window(0, 0, W - 1, HEADER - 1);
+            stripe_y = 0;
+            state = HEADER_DRAW;
+        }
+        break;
+    case HEADER_DRAW:
+        fill_header_stripe(stripe_y);
+        ili9488_write_dma(stripe, sizeof(stripe));
+        stripe_y += STRIPE;
+        if (stripe_y >= HEADER) {
+            state = IDLE;
+        }
         break;
     case FFT:
         fft_run_stage(fft_stage);
@@ -189,7 +289,7 @@ void spectrum_poll(void) {
     case LEVELS:
         compute_levels();
         ili9488_set_format(ILI9488_RGB111);
-        ili9488_set_window(0, 0, W - 1, SPECTRUM_HEIGHT - 1);
+        ili9488_set_window(0, HEADER, W - 1, SPECTRUM_HEIGHT - 1);
         stripe_y = 0;
         state = SPECTRUM;
         break;
@@ -197,7 +297,7 @@ void spectrum_poll(void) {
         fill_stripe(stripe_y);
         ili9488_write_dma(stripe, sizeof(stripe));
         stripe_y += STRIPE;
-        if (stripe_y >= SPECTRUM_HEIGHT) {
+        if (stripe_y >= SPEC_ROWS) {
             state = WATERFALL;
         }
         break;
