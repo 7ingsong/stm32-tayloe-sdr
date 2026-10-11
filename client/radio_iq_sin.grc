@@ -57,7 +57,7 @@ blocks:
     start: -samp_rate//2
     step: '1'
     stop: samp_rate//2
-    value: 1e3
+    value: 10e3
     widget: counter_slider
   states:
     bus_sink: false

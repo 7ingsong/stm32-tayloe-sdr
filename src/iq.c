@@ -47,16 +47,18 @@ static int rx_streaming = 0;
 // The DAC runs from boot fed by the mic SSB modulator; TX_START hands it to the host, TX_STOP gives it back
 static int tx_from_mic = 1;
 
-// Half duplex for the on-board radio: 0 = receive (SSB RX on I2S, DAC silent), 1 = transmit (mic SSB on
-// the DAC, I2S silent). Only one of the two DSP chains runs at a time; the CPU can't afford both.
-static uint8_t ptt = 0;
+// On-board radio mode (iq.h): receive only, transmit only, or both chains at once (full duplex)
+static uint8_t ptt = RADIO_RX;
+
+#define RX_ACTIVE() (ptt != RADIO_TX)
+#define TX_ACTIVE() (ptt != RADIO_RX)
 
 uint8_t iq_get_ptt(void) {
     return ptt;
 }
 
-void iq_set_ptt(uint8_t on) {
-    ptt = on ? 1 : 0;
+void iq_set_ptt(uint8_t mode) {
+    ptt = mode > RADIO_DUPLEX ? RADIO_DUPLEX : mode;
 }
 
 #define RX_FRAMES_PER_PASS 4 // ~0.25 ms of checksums and copies
@@ -71,13 +73,21 @@ static void dac_restart_fifo(int prime_blocks) {
     }
 }
 
-void on_mic(uint16_t *buf, int n) {
-    if (!tx_from_mic) {
-        return;
-    }
-    static uint32_t iq[MIC_N_SAMPLES / 2]; // 2 KB: keep it off the small stack
-    if (ptt) {
-        ssb_tx_process(buf, n, iq);
+/*
+ * A mic block takes ~2.8 ms to modulate: in duplex that would make the I2S refill late (clicks), so like the
+ * receiver it is only queued here and iq_tx_poll() works through it in small chunks, appending to the DAC fifo.
+ * The DAC is primed two blocks ahead, so finishing a block within its 8 ms keeps the stream continuous.
+ */
+#define TX_CHUNK 64 // multiple of 8: ssb_tx_process() emits 8 DAC words per 8 kHz sample
+
+static const uint16_t *mic_queue;
+static int mic_queued;
+
+static void tx_chunk(void) {
+    static uint32_t iq[TX_CHUNK];
+    int n = mic_queued < TX_CHUNK ? mic_queued : TX_CHUNK;
+    if (TX_ACTIVE()) {
+        ssb_tx_process(mic_queue, n, iq);
     } else {
         // Keep feeding the DAC so the fifo level (and thus the latency) stays put while receiving
         for (int i = 0; i < n; i++) {
@@ -85,6 +95,25 @@ void on_mic(uint16_t *buf, int n) {
         }
     }
     fifo_write(&fifo_dac, (const uint8_t*)iq, n * sizeof(uint32_t));
+    mic_queue += n;
+    mic_queued -= n;
+}
+
+void on_mic(uint16_t *buf, int n) {
+    if (!tx_from_mic) {
+        return;
+    }
+    while (mic_queued > 0) {
+        tx_chunk(); // previous block not finished (shouldn't happen): finish it now
+    }
+    mic_queue = buf;
+    mic_queued = n;
+}
+
+void iq_tx_poll(void) {
+    if (mic_queued > 0 && tx_from_mic) {
+        tx_chunk();
+    }
 }
 
 void iq_set_frequency(uint32_t frequency) {
@@ -98,7 +127,7 @@ uint32_t iq_get_frequency(void) {
 
 void on_adc(uint32_t *buf, int n){
     spectrum_capture(buf, n);
-    if (!ptt && tx_from_mic) { // half duplex: also idle while the host transmits (TX_START)
+    if (RX_ACTIVE() && tx_from_mic) { // also idle while the host transmits (TX_START)
         ssb_rx_process_adc(buf, n);
     }
 
@@ -165,7 +194,7 @@ static void handle_set_freq(const frame_t* frame) {
 // Empty payload: report; 1 byte: 0 = receive, 1 = transmit. ACK carries the state in effect.
 static void handle_ptt(const frame_t* frame) {
     if (frame->command.len == 1) {
-        iq_set_ptt(frame->payload[0]);
+        iq_set_ptt(frame->payload[0]); // 0 = RX, 1 = TX, 2 = duplex
     } else if (frame->command.len != 0) {
         command_send_error(frame->command.seq, ERR_BAD_LENGTH, frame->command.len & 0xFF);
         return;
@@ -238,6 +267,7 @@ void command_handler(const frame_t* frame) {
 
         case CMD_IQ_STREAM_TX_START:
             tx_from_mic = 0;
+            mic_queued = 0;
             dac_restart_fifo(0); // the host fills it from here
             command_send(RESP_ACK, frame->command.seq, 0, 0);
             break;

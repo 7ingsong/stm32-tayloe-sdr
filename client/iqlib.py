@@ -260,10 +260,13 @@ class DeviceClient:
         resp = self.req_command(CMD_SET_FREQ, cmd_resp=RESP_ACK, payload=payload)
         return struct.unpack("<I", resp)[0]
 
-    def set_ptt(self, on=None):
-        """On-board radio: True = transmit from the mic, False = receive on I2S, None = just read. Returns the state."""
-        payload = b"" if on is None else bytes([1 if on else 0])
-        return bool(self.req_command(CMD_PTT, cmd_resp=RESP_ACK, payload=payload)[0])
+    RADIO_RX, RADIO_TX, RADIO_DUPLEX = 0, 1, 2
+
+    def set_ptt(self, mode=None):
+        """On-board radio mode: RADIO_RX (or False) = receive on I2S, RADIO_TX (or True) = transmit from the mic,
+        RADIO_DUPLEX = both at once, None = just read. Returns the mode in effect."""
+        payload = b"" if mode is None else bytes([int(mode)])
+        return self.req_command(CMD_PTT, cmd_resp=RESP_ACK, payload=payload)[0]
 
     def set_volume(self, volume=None):
         """On-board receiver volume 0..255 (0 = mute, each doubling +6 dB), None = just read. Returns the volume."""

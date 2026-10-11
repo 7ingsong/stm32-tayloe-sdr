@@ -9,10 +9,11 @@
 #include "ili9488.h"
 #include "spectrum.h"
 
-// The I2S half-buffer is only 2.6 ms: refill it (and demodulate the next chunk) between every other step
+// The I2S half-buffer is only 2.6 ms: refill it (and run the next RX/TX DSP chunk) between every other step
 static void audio_service(void) {
     i2s_dispatch();
     ssb_rx_poll();
+    iq_tx_poll();
 }
 
 int main() {

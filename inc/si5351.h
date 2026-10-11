@@ -79,6 +79,14 @@ int si5351_SetupOutput(uint8_t output, si5351PLL_t pllSource, si5351DriveStrengt
 
 void si5351_init();
 void si5351_clk2_8mhz();
+// LO-Q phase trim (steps of 90/div deg, ~1 deg at 10 MHz) to correct I/Q quadrature skew on the board.
+// +6 was found by sweeping at 10 MHz in duplex: it took the TX->RX image from +1 dB to -10 dB.
+// In degrees it scales with frequency (~3 deg per step at 30 MHz), so other bands may want another value.
+#ifndef SI5351_PHASE_TRIM_DEFAULT
+#define SI5351_PHASE_TRIM_DEFAULT 6
+#endif
+extern volatile int8_t si5351_phase_trim;
+
 // Queues the I/Q LO retune; si5351_poll() writes it out in short I2C bursts from the main loop
 void si5351_set_frequency(int32_t frequency, si5351DriveStrength_t strength);
 void si5351_set_frequency_blocking(int32_t frequency, si5351DriveStrength_t strength);
