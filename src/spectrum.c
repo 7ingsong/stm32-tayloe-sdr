@@ -151,8 +151,10 @@ void spectrum_init(void) {
 }
 
 // Windowed samples go straight to their bit-reversed slots, so the in-place FFT needs no reorder pass
+volatile uint8_t spectrum_debug_pause;
+
 void spectrum_capture(const uint32_t *adc, int n) {
-    if (state != IDLE || n < FFT_N || ++capture_count < SPECTRUM_CAPTURE_EVERY) {
+    if (state != IDLE || spectrum_debug_pause || n < FFT_N || ++capture_count < SPECTRUM_CAPTURE_EVERY) {
         return;
     }
     capture_count = 0;
@@ -258,8 +260,11 @@ static void fill_stripe(int y0) {
     }
 }
 
+// Debug: spectrum_debug_pause = 1 over SWD stops new frames (the current one finishes), to tell display
+// interference from other noise
+
 void spectrum_poll(void) {
-    if (ili9488_busy()) {
+    if (ili9488_busy() || (spectrum_debug_pause && state == IDLE)) {
         return;
     }
     switch (state) {
